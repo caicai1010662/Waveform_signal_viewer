@@ -54,8 +54,6 @@ class GridView(QtWidgets.QWidget):
 
     # Qt 信号
     channel_clicked = QtCore.pyqtSignal(int)
-    wheel_time = QtCore.pyqtSignal(int)
-    wheel_amp = QtCore.pyqtSignal(int)
 
     def __init__(self, sd: SignalData):
         super().__init__()
@@ -78,6 +76,9 @@ class GridView(QtWidgets.QWidget):
         self._zero_lines_l: list[pg.InfiniteLine] = []   # 左侧零基线
         self._zero_lines_r: list[pg.InfiniteLine] = []   # 右侧零基线
         self._zebra_rects: list[pg.LinearRegionItem] = [] # 斑马纹交替行
+
+        # ── 时间轴缓冲区（复用，避免每帧分配 numpy 数组）───
+        self._t_buf = np.empty(0, dtype=np.float32)
 
         # ── Tile 模式专用 ─────────────────────────────────
         self._tiles_orig: dict[tuple, tuple] = {}  # (row,col) → (PlotItem, curve)
@@ -149,11 +150,13 @@ class GridView(QtWidgets.QWidget):
         root.addWidget(self._row_widget)
         root.addWidget(self._tile_widget)
 
-        # 事件过滤 — 捕获点击（打开 Detail）和滚轮（时窗/幅值）
+        # 事件过滤 — 捕获点击（打开 Detail）
+        # Row 模式: 监听左右 PlotWidget 的 viewport
         self._left_pw.viewport().installEventFilter(self)
         self._right_pw.viewport().installEventFilter(self)
-        self._left_pw.scene().installEventFilter(self)
-        self._right_pw.scene().installEventFilter(self)
+        # Tile 模式: 监听左右 GraphicsLayoutWidget 的 viewport
+        self._tile_left.viewport().installEventFilter(self)
+        self._tile_right.viewport().installEventFilter(self)
 
     @staticmethod
     def _make_vsep():
@@ -390,8 +393,11 @@ class GridView(QtWidgets.QWidget):
         if ptr + wp > sd.n_samples:      # 边界保护
             ptr = max(0, sd.n_samples - wp)
         t_slice = slice(ptr, ptr + wp)   # memmap 切片（不复制数据）
-        t = np.arange(wp, dtype=np.float32) / sd.s_freq  # 时间轴
-        t, wp = _clip_to_screen(t, wp)   # 超限时步进降采样
+        # 时间轴缓冲区 — 只在 wp 变化时重新分配（避免每帧分配 1500 个 float）
+        if len(self._t_buf) != wp:
+            self._t_buf = np.arange(wp, dtype=np.float32) / sd.s_freq
+        t = self._t_buf
+        t, wp = _step_decimate(t, wp)   # 超限时步进降采样
 
         n_pool = len(self._curves_orig)
         row_h = self._total_height / max(1, sd.n_chan)
@@ -447,7 +453,10 @@ class GridView(QtWidgets.QWidget):
         if ptr + wp > sd.n_samples:
             ptr = max(0, sd.n_samples - wp)
         t_slice = slice(ptr, ptr + wp)
-        t = np.arange(wp, dtype=np.float32) / sd.s_freq
+        # 时间轴缓冲区 — 复用 row 模式的 _t_buf
+        if len(self._t_buf) != wp:
+            self._t_buf = np.arange(wp, dtype=np.float32) / sd.s_freq
+        t = self._t_buf
         t, wp = _clip_to_screen(t, wp)
 
         # 更新左侧栅格
@@ -455,8 +464,6 @@ class GridView(QtWidgets.QWidget):
             abs_ch = self._ch_offset + r * TILE_COLS + c
             if abs_ch >= sd.n_chan:
                 continue
-            ch_amp = float(sd.ch_amp[abs_ch]) * sd.amp_scale
-            pi.setYRange(-ch_amp * 1.2, ch_amp * 1.2, padding=0)
             curve.setData(t, sd.orig[abs_ch, t_slice][:wp])
             _update_tile_label(pi, abs_ch)
 
@@ -465,8 +472,6 @@ class GridView(QtWidgets.QWidget):
             abs_ch = self._ch_offset + r * TILE_COLS + c
             if abs_ch >= sd.n_chan:
                 continue
-            ch_amp = float(sd.ch_amp[abs_ch]) * sd.amp_scale
-            pi.setYRange(-ch_amp * 1.2, ch_amp * 1.2, padding=0)
             curve.setData(t, sd.recon[abs_ch, t_slice][:wp])
 
     # ═══════════════════════════════════════════════════════════
@@ -521,6 +526,7 @@ class GridView(QtWidgets.QWidget):
             self._left_vb.setYRange(y_bot, y_top, padding=0)
             self._right_vb.setYRange(y_bot, y_top, padding=0)
         else:
+            self._update_tile_yranges(sd)
             self._fill_tile_data(sd, self._last_ptr if self._last_ptr >= 0 else 0)
 
     def update_ranges(self, sd: SignalData):
@@ -553,34 +559,46 @@ class GridView(QtWidgets.QWidget):
             self._left_vb.setYRange(y_bot, y_top, padding=0)
             self._right_vb.setYRange(y_bot, y_top, padding=0)
         else:
+            self._update_tile_yranges(sd)
             self._fill_tile_data(sd, self._last_ptr if self._last_ptr >= 0 else 0)
+
+    def _update_tile_yranges(self, sd: SignalData):
+        """更新所有 Tile 的 Y 轴范围 — 仅在通道切换 / 幅值变化时调用。
+
+        播放期间（_fill_tile_data）不再调用 setYRange，减少 ViewBox 重计算开销。
+        """
+        for (r, c), (pi, _) in list(self._tiles_orig.items()):
+            abs_ch = self._ch_offset + r * TILE_COLS + c
+            if abs_ch < sd.n_chan:
+                ch_amp = float(sd.ch_amp[abs_ch]) * sd.amp_scale
+                pi.setYRange(-ch_amp * 1.2, ch_amp * 1.2, padding=0)
+        for (r, c), (pi, _) in list(self._tiles_recon.items()):
+            abs_ch = self._ch_offset + r * TILE_COLS + c
+            if abs_ch < sd.n_chan:
+                ch_amp = float(sd.ch_amp[abs_ch]) * sd.amp_scale
+                pi.setYRange(-ch_amp * 1.2, ch_amp * 1.2, padding=0)
 
     # ═══════════════════════════════════════════════════════════
     # 事件过滤 — 滚轮（时窗/幅值）+ 点击（打开 Detail）
     # ═══════════════════════════════════════════════════════════
 
     def eventFilter(self, obj, event):
+        """捕获鼠标左键点击 → 确定被点击的通道 → 发射 channel_clicked 信号。
+
+        Row 模式: 通过 Y 坐标找最接近的通道（基于 _y_offsets）。
+        Tile 模式: 遍历所有栅格，通过 ViewBox 的 sceneBoundingRect 定位。
+        """
         if not self._sd.ready or self._y_offsets is None:
             return False
 
-        # 滚轮 → 时窗（普通）或幅值（Shift+滚轮）
-        if event.type() == QtCore.QEvent.Wheel:
-            delta = 1 if event.angleDelta().y() > 0 else -1
-            modifiers = QtWidgets.QApplication.instance().keyboardModifiers()
-            if modifiers & QtCore.Qt.ShiftModifier:
-                self.wheel_amp.emit(delta)
-            else:
-                self.wheel_time.emit(delta)
-            return False
-
-        # 左键点击 → 确定通道 → 发射 channel_clicked
         if (event.type() == QtCore.QEvent.MouseButtonRelease
                 and event.button() == QtCore.Qt.LeftButton):
+
+            # ── Row 模式 ──────────────────────────────
             if self._mode == "row":
-                # 确定点击来源（左侧或右侧 ViewBox）
-                pw = self._left_pw if obj in (
-                    self._left_pw.viewport(),
-                    self._left_pw.scene()) else self._right_pw
+                pw = (self._left_pw
+                      if obj == self._left_pw.viewport()
+                      else self._right_pw)
                 vb = pw.getPlotItem().getViewBox()
                 data_pt = vb.mapToView(pg.Point(event.pos()))
                 y = float(data_pt.y())
@@ -590,6 +608,28 @@ class GridView(QtWidgets.QWidget):
                     self.channel_clicked.emit(ch)
                 return True
 
+            # ── Tile 模式 ─────────────────────────────
+            elif self._mode == "tile":
+                # 确定点击来源: 左侧还是右侧栅格
+                if obj == self._tile_left.viewport():
+                    glw = self._tile_left
+                    tiles = self._tiles_orig
+                elif obj == self._tile_right.viewport():
+                    glw = self._tile_right
+                    tiles = self._tiles_recon
+                else:
+                    return False
+
+                # 将 viewport 坐标转为 scene 坐标
+                scene_pt = glw.mapToScene(event.pos())
+                for (r, c), (pi, _) in tiles.items():
+                    vb = pi.getViewBox()
+                    if vb.sceneBoundingRect().contains(scene_pt):
+                        abs_ch = self._ch_offset + r * TILE_COLS + c
+                        if 0 <= abs_ch < self._sd.n_chan:
+                            self.channel_clicked.emit(abs_ch)
+                        return True
+
         return False
 
 
@@ -597,7 +637,7 @@ class GridView(QtWidgets.QWidget):
 # 模块级工具函数
 # ═══════════════════════════════════════════════════════════════
 
-def _clip_to_screen(t: np.ndarray, wp: int) -> tuple[np.ndarray, int]:
+def _step_decimate(t: np.ndarray, wp: int) -> tuple[np.ndarray, int]:
     """简单步进降采样。当数据点数超过 MAX_POINTS_PER_CURVE 时，每隔 N 个取 1 个。
 
     Args:
@@ -605,7 +645,7 @@ def _clip_to_screen(t: np.ndarray, wp: int) -> tuple[np.ndarray, int]:
         wp: 原始数据点数
 
     Returns:
-        (裁剪后的 t, 裁剪后的 wp)
+        (降采样后的 t, 降采样后的 wp)
 
     注意: 正常情况 window_pts ≈ 1500 < MAX_POINTS_PER_CURVE(6000)，
           所以这个函数通常不做任何裁剪，直接返回原值。

@@ -4,7 +4,7 @@ decimator.py — 数据降采样算法
   将高采样率信号（30k Sa/s × N 秒 = 数万点）压缩到屏幕分辨率级别
   （~1500 点），保留视觉峰值和趋势，丢弃不可见的冗余数据点。
 
-  当前项目不使用运行时降采样。窗口裁剪（grid.py 的 _clip_to_screen）
+  当前项目不使用运行时降采样。窗口裁剪（grid.py 的 _step_decimate）
   已自然将每曲线点数限制在 ~1500 点。本模块作为备用的精确降采样工具保留。
 
   参考: Sveinn Steinarsson (2013), "Downsampling Time Series for Visual Representation"

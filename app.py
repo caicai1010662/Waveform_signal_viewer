@@ -301,29 +301,13 @@ class MainWindow(QtWidgets.QMainWindow):
     # ═══════════════════════════════════════════════════════════
 
     def _bind_keys(self):
-        """绑定全局键盘快捷键。"""
-        S = QtWidgets.QShortcut
-        K = QtCore.Qt
-        Q = QtGui.QKeySequence
+        """绑定键盘快捷键 — 仅保留 Space 播放/暂停。"""
+        Shortcut = QtWidgets.QShortcut
+        QtKey = QtCore.Qt
+        KeySeq = QtGui.QKeySequence
 
-        S(Q(K.Key_Space), self,
-          activated=lambda: self._player.toggle())           # 播放/暂停
-        S(Q(K.Key_Up), self,
-          activated=lambda: self._slider_ch.setValue(
-              max(0, self._slider_ch.value() - 1)))          # 上一个通道
-        S(Q(K.Key_Down), self,
-          activated=lambda: self._slider_ch.setValue(
-              min(self._slider_ch.maximum(),
-                  self._slider_ch.value() + 1)))             # 下一个通道
-        S(Q(K.Key_Left), self,
-          activated=lambda: self._player.seek_delta(
-              -max(1, self._sd.window_pts // 20)))           # 时间轴后退 5%
-        S(Q(K.Key_Right), self,
-          activated=lambda: self._player.seek_delta(
-              max(1, self._sd.window_pts // 20)))            # 时间轴前进 5%
-        S(Q("Ctrl+Up"), self, activated=self._player.speed_up)     # 加速
-        S(Q("Ctrl+Down"), self, activated=self._player.speed_down) # 减速
-        S(Q("Ctrl+R"), self, activated=self._cycle_mode)     # 循环切换模式
+        Shortcut(KeySeq(QtKey.Key_Space), self,
+                 activated=lambda: self._player.toggle())           # 播放/暂停
 
     # ═══════════════════════════════════════════════════════════
     # 模式切换
@@ -352,20 +336,6 @@ class MainWindow(QtWidgets.QMainWindow):
                     max(0, self._sd.max_channel_offset))
 
         self._update_status()
-
-    def _cycle_mode(self):
-        """Ctrl+R: 循环切换 Compare → Browse → Roll → Compare。"""
-        modes = ["row", "tile", "scope"]
-        idx = modes.index(self._mode)
-        next_mode = modes[(idx + 1) % 3]
-        btn_map = {"row": self._btn_row,
-                    "tile": self._btn_tile,
-                    "scope": self._btn_scope}
-        btn_map[next_mode].setChecked(True)
-
-    # ═══════════════════════════════════════════════════════════
-    # 文件加载
-    # ═══════════════════════════════════════════════════════════
 
     def _load_orig(self):
         """加载原始信号 .mat 文件。"""
@@ -493,17 +463,22 @@ class MainWindow(QtWidgets.QMainWindow):
           1. Player._tick() → frame_ready(ptr)
           2. _on_frame → grid.scroll(ptr) 或 scope.scroll(ptr)
           3. Player.ack() → 释放 _pending 锁
+
+        finally 块保证 ack() 一定执行：即使视图渲染抛异常，
+        _pending 锁也会释放，播放器不会永久冻结。
         """
         if not self._sd.ready:
             return
-        ptr = self._player.ptr
-        if ptr + self._sd.window_pts > self._sd.n_samples:
-            return
-        if self._mode == "scope":
-            self._scope.scroll(ptr, self._sd)
-        else:
-            self._grid.scroll(ptr, self._sd)
-        self._player.ack()
+        try:
+            ptr = self._player.ptr
+            if ptr + self._sd.window_pts > self._sd.n_samples:
+                return
+            if self._mode == "scope":
+                self._scope.scroll(ptr, self._sd)
+            else:
+                self._grid.scroll(ptr, self._sd)
+        finally:
+            self._player.ack()
 
     def _on_state(self, playing: bool):
         """播放状态变化 → 更新按钮文字。"""

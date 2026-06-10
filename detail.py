@@ -238,14 +238,14 @@ class DetailWindow(QtWidgets.QMainWindow):
         orig_slice = sd.orig[self._ch, ptr:ptr + wp]
         recon_slice = sd.recon[self._ch, ptr:ptr + wp]
 
-        # Overlay 模式 — 更新两条曲线
-        self._overlay_orig.setData(self._t_buf, orig_slice)
-        self._overlay_recon.setData(self._t_buf, recon_slice)
-
-        # Side-by-side 模式 — 如果面板存在则更新
-        if hasattr(self, '_side_orig'):
-            self._side_orig.setData(self._t_buf, orig_slice)
-            self._side_recon.setData(self._t_buf, recon_slice)
+        # 仅更新当前可见模式的曲线（隐藏面板的 setData 纯属浪费）
+        if self._overlay:
+            self._overlay_orig.setData(self._t_buf, orig_slice)
+            self._overlay_recon.setData(self._t_buf, recon_slice)
+        else:
+            if hasattr(self, '_side_orig'):
+                self._side_orig.setData(self._t_buf, orig_slice)
+                self._side_recon.setData(self._t_buf, recon_slice)
 
         # 底部信息栏
         self._lbl_info.setText(
