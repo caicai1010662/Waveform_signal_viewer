@@ -56,7 +56,7 @@ VISIBLE_TILE_ROWS = 4
 
 # LTTB 降采样目标点数。每个通道数据会被压缩到这个点数再渲染
 # 一般设为屏幕宽度（1920）即可，超过这个数人眼也分辨不出
-DECIMATION_TARGET = 1500
+DECIMATION_TARGET = 2560
 
 # MinMax 降采样 bucket 数。Tile 缩略图用的更快速降采样
 MINMAX_BUCKETS = 400
@@ -75,7 +75,7 @@ WINDOW_SEC_MAX = 0.10   # 最大 100ms（最缩小）
 
 # 幅值缩放范围。1.0 = 原始幅值，改大 = 波形纵向拉高
 AMP_SCALE_MIN  = 1.0    # 最小 1.0×（波形最扁）
-AMP_SCALE_MAX  = 10.0   # 最大 10.0×（波形最拉伸）
+AMP_SCALE_MAX  = 3.0   # 最大 3.0×（波形最拉伸）
 
 # 播放速度倍率范围。1.0 = 基础速度
 SPEED_MUL_MIN  = 0.5    # 最慢 0.5×
@@ -88,12 +88,12 @@ SPEED_MUL_MAX  = 1.5    # 最快 1.5×
 
 # 通道幅值估算用的百分位。99.5 = 取绝对值最大的前 0.5% 作为峰值
 # 改大（99.9）→ 更保守，少裁切尖峰；改小（95）→ 更多尖峰被裁
-Y_PERCENTILE = 99.5
+Y_PERCENTILE = 99.9
 
 # 通道间距系数。实际间距 = 通道幅值 × SPACING_FACTOR × amp_scale
 # 改小（1.0~1.5）→ 通道紧凑，波形填满，更多通道一屏可见
 # 改大（3.0~5.0）→ 通道松散，每个通道留白大
-SPACING_FACTOR = 1.5
+SPACING_FACTOR = 3
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -105,10 +105,10 @@ COLOR_BG     = "#181818"  # 窗口底色（最外层背景）
 COLOR_CARD   = "#1E1E1E"  # 波形面板底色（比 BG 稍亮一点，形成层级感）
 COLOR_ORIG   = "#4FC1FF"  # 原始信号曲线颜色
 COLOR_RECON  = "#DCDCAA"  # 重建信号曲线颜色
-COLOR_GRID   = "#333333"  # 零基线 / 辅助参考线颜色
+COLOR_GRID   = "#4A4A4A"  # 零基线 / 辅助参考线（提亮，在斑马纹上清晰可见）
 COLOR_ACCENT = "#007ACC"  # 交互强调色（按钮选中、滑块手柄、hover 高亮）
 COLOR_TEXT   = "#CCCCCC"  # 所有文字的颜色
-COLOR_SEP    = "#2B2B2B"  # 分隔线颜色（左右面板之间、顶栏下方）
+COLOR_SEP    = "#3E3E42"  # 中轴分隔线（强化左右面板的切割感）
 COLOR_SLIDER = "#464646"  # 滑动条轨道底色（比卡片稍亮，确保轨道可见）
 COLOR_HOVER  = "#2A2D2E"  # 鼠标悬停时的底色
 COLOR_ZEBRA  = "#222222"  # 斑马纹交替行底色（Row 模式每隔一个通道的浅色背景）

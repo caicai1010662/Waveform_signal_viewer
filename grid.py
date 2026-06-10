@@ -225,16 +225,14 @@ class GridView(QtWidgets.QWidget):
         """
         n_pool = min(VISIBLE_ROWS, sd.n_chan)
         w = sd.window_sec
-        row_h = self._total_height / max(1, sd.n_chan)  # 每行高度
 
         # ── 斑马纹 — 偶数行加浅色背景 ────────────────────
+        # 初始值随便设 [0,1]，_fill_row_data 中会用真实 ch_amp 更新
         for i in range(n_pool):
             if i % 2 == 1:
                 continue  # 只给偶数行加斑马纹
-            abs_ch = i
-            offset = float(self._y_offsets[abs_ch])
             zebra = pg.LinearRegionItem(
-                values=[offset - row_h / 2, offset + row_h / 2],
+                values=[0, 1],
                 orientation='horizontal',
                 brush=pg.mkBrush(COLOR_ZEBRA),
                 pen=pg.mkPen(None))           # 无边框
@@ -268,31 +266,27 @@ class GridView(QtWidgets.QWidget):
             c_r.setSkipFiniteCheck(True)
             self._curves_recon.append(c_r)
 
-            # 左侧标签
-            lbl_l = pg.TextItem("", color=COLOR_TEXT, anchor=(0, 0.5))
+            # 标签底色动态匹配：偶数行(斑马纹)用 COLOR_ZEBRA，奇数行用 COLOR_CARD
+            bg_color = COLOR_ZEBRA if i % 2 == 0 else COLOR_CARD
+
+            # 左侧标签 — Z 值 100 绝对置顶，波形永远从文字下方穿过
+            lbl_l = pg.TextItem("", color=COLOR_TEXT, anchor=(0, 0.5),
+                                fill=pg.mkBrush(bg_color))
             lbl_l.setFont(make_font(8))
+            lbl_l.setZValue(100)
             self._left_pi.addItem(lbl_l)
             self._labels_l.append(lbl_l)
 
-            # 右侧标签
-            lbl_r = pg.TextItem("", color=COLOR_TEXT, anchor=(1, 0.5))
-            lbl_r.setFont(make_font(8))
-            self._right_pi.addItem(lbl_r)
-            self._labels_r.append(lbl_r)
-
-        # 填充初始数据
+        # 填充初始数据（含斑马纹真实高度 + 标签位置）
         self._fill_row_data(sd, 0)
 
-        # 设置视口范围
-        self._left_vb.setXRange(0, w, padding=0)
-        self._right_vb.setXRange(0, w, padding=0)
+        # 设置 X 范围 — 左右各留 2% 呼吸空间，避免波形撞墙
+        pad_x = w * 0.02
+        self._left_vb.setXRange(-pad_x, w + pad_x, padding=0)
+        self._right_vb.setXRange(-pad_x, w + pad_x, padding=0)
 
-        self._left_vb.setYRange(
-            max(0, self._total_height - n_pool * row_h),
-            self._total_height, padding=0)
-        self._right_vb.setYRange(
-            max(0, self._total_height - n_pool * row_h),
-            self._total_height, padding=0)
+        # Y 视口 — 使用真实幅值计算，替代平均行高
+        self._update_row_yrange(sd)
 
     def _build_tile_pool(self, sd: SignalData):
         """Tile 模式: 创建栅格网格。
@@ -398,7 +392,6 @@ class GridView(QtWidgets.QWidget):
         t, wp = _step_decimate(t, wp)   # 超限时步进降采样
 
         n_pool = len(self._curves_orig)
-        row_h = self._total_height / max(1, sd.n_chan)
 
         for i in range(n_pool):
             abs_ch = self._ch_offset + i  # 绝对通道索引
@@ -411,8 +404,11 @@ class GridView(QtWidgets.QWidget):
                     t, sd.orig[abs_ch, t_slice][:wp] + offset)
                 self._curves_recon[i].setData(
                     t, sd.recon[abs_ch, t_slice][:wp] + offset)
+                # 当前通道的真实高度（基于 ch_amp，不是平均行高）
+                ch_h = float(sd.ch_amp[abs_ch]) * SPACING_FACTOR * sd.amp_scale
             else:
                 offset = 0.0
+                ch_h = 1.0
 
             vis = active
             self._curves_orig[i].setVisible(vis)
@@ -426,21 +422,19 @@ class GridView(QtWidgets.QWidget):
                 self._zero_lines_r[i].setPos(offset)
                 self._zero_lines_r[i].setVisible(vis)
 
-            # 更新标签
+            # 更新标签 — 动态 X 边距（窗口宽度的 1%），告别贴边窒息感
             lbl_text = format_channel_label(abs_ch) if active else ""
+            x_margin = sd.window_sec * 0.01
             if i < len(self._labels_l):
                 self._labels_l[i].setText(lbl_text)
-                self._labels_l[i].setPos(0.0005, offset)
-            if i < len(self._labels_r):
-                self._labels_r[i].setText(lbl_text)
-                self._labels_r[i].setPos(sd.window_sec - 0.0005, offset)
+                self._labels_l[i].setPos(x_margin, offset)
 
-            # 更新斑马纹（仅偶数行）
+            # 更新斑马纹（仅偶数行）— 使用真实通道高度 ch_h 完美包裹
             zi = i // 2
             if i % 2 == 0 and zi < len(self._zebra_rects):
                 if active:
                     rgn = self._zebra_rects[zi]
-                    rgn.setRegion([offset - row_h / 2, offset + row_h / 2])
+                    rgn.setRegion([offset - ch_h / 2.0, offset + ch_h / 2.0])
                     rgn.setVisible(True)
                 else:
                     self._zebra_rects[zi].setVisible(False)
@@ -455,7 +449,7 @@ class GridView(QtWidgets.QWidget):
         if len(self._t_buf) != wp:
             self._t_buf = np.arange(wp, dtype=np.float32) / sd.s_freq
         t = self._t_buf
-        t, wp = _clip_to_screen(t, wp)
+        t, wp = _step_decimate(t, wp)
 
         # 更新左侧栅格
         for (r, c), (pi, curve) in list(self._tiles_orig.items()):
@@ -517,12 +511,7 @@ class GridView(QtWidgets.QWidget):
 
         if self._mode == "row":
             self._fill_row_data(sd, self._last_ptr if self._last_ptr >= 0 else 0)
-            n_pool = len(self._curves_orig)
-            row_h = self._total_height / max(1, sd.n_chan)
-            y_top = self._total_height - self._ch_offset * row_h
-            y_bot = max(0, y_top - n_pool * row_h)
-            self._left_vb.setYRange(y_bot, y_top, padding=0)
-            self._right_vb.setYRange(y_bot, y_top, padding=0)
+            self._update_row_yrange(sd)
         else:
             self._update_tile_yranges(sd)
             self._fill_tile_data(sd, self._last_ptr if self._last_ptr >= 0 else 0)
@@ -531,8 +520,9 @@ class GridView(QtWidgets.QWidget):
         """时窗变化回调。更新 X 范围 + 重填数据。"""
         w = sd.window_sec
         if self._mode == "row":
-            self._left_vb.setXRange(0, w, padding=0)
-            self._right_vb.setXRange(0, w, padding=0)
+            pad_x = w * 0.02
+            self._left_vb.setXRange(-pad_x, w + pad_x, padding=0)
+            self._right_vb.setXRange(-pad_x, w + pad_x, padding=0)
             self._fill_row_data(sd, self._last_ptr if self._last_ptr >= 0 else 0)
         else:
             for pi, _ in list(self._tiles_orig.values()):
@@ -550,12 +540,7 @@ class GridView(QtWidgets.QWidget):
 
         if self._mode == "row":
             self._fill_row_data(sd, self._last_ptr if self._last_ptr >= 0 else 0)
-            n_pool = len(self._curves_orig)
-            row_h = self._total_height / max(1, sd.n_chan)
-            y_top = self._total_height - self._ch_offset * row_h
-            y_bot = max(0, y_top - n_pool * row_h)
-            self._left_vb.setYRange(y_bot, y_top, padding=0)
-            self._right_vb.setYRange(y_bot, y_top, padding=0)
+            self._update_row_yrange(sd)
         else:
             self._update_tile_yranges(sd)
             self._fill_tile_data(sd, self._last_ptr if self._last_ptr >= 0 else 0)
@@ -576,8 +561,32 @@ class GridView(QtWidgets.QWidget):
                 ch_amp = float(sd.ch_amp[abs_ch]) * sd.amp_scale
                 pi.setYRange(-ch_amp * 1.2, ch_amp * 1.2, padding=0)
 
+    def _update_row_yrange(self, sd: SignalData):
+        """基于当前可见通道的真实幅值计算 Y 轴视口范围。
+
+        摒弃平均行高（total_height/n_chan），改用首尾通道的实际 ch_amp。
+        解决通道幅值差异大时视口漂移、波形"挤作一团"的 Bug。
+        """
+        n_pool = len(self._curves_orig)
+        if n_pool == 0 or not sd.ready or self._y_offsets is None:
+            return
+
+        top_ch = self._ch_offset
+        bot_ch = min(sd.n_chan - 1, self._ch_offset + n_pool - 1)
+
+        top_h = float(sd.ch_amp[top_ch]) * SPACING_FACTOR * sd.amp_scale
+        bot_h = float(sd.ch_amp[bot_ch]) * SPACING_FACTOR * sd.amp_scale
+
+        y_top = self._y_offsets[top_ch] + top_h / 2.0
+        y_bot = self._y_offsets[bot_ch] - bot_h / 2.0
+
+        # 上下各留 5% 的呼吸空间，防止波峰/波谷贴边
+        pad = (y_top - y_bot) * 0.05
+        self._left_vb.setYRange(y_bot - pad, y_top + pad, padding=0)
+        self._right_vb.setYRange(y_bot - pad, y_top + pad, padding=0)
+
     # ═══════════════════════════════════════════════════════════
-    # 事件过滤 — 滚轮（时窗/幅值）+ 点击（打开 Detail）
+    # 事件过滤 — 点击（打开 Detail）
     # ═══════════════════════════════════════════════════════════
 
     def eventFilter(self, obj, event):
