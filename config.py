@@ -15,7 +15,7 @@ LINE_WIDTH = 0.6
 
 # ── 网格布局 ──────────────────────────────────────────────
 TILE_COLS = 6                 # Tile 模式每行栅格数
-VISIBLE_ROWS = 8              # Row 模式一屏可见行数
+VISIBLE_ROWS = 6              # Row 模式一屏可见行数
 VISIBLE_TILE_ROWS = 4         # Tile 模式一屏可见行数
 
 # ── 2048 通道性能 ─────────────────────────────────────────
@@ -24,16 +24,16 @@ MINMAX_BUCKETS = 400          # MinMax 降采样 bucket 数（tile 模式）
 CACHE_DECIMATED = True        # 是否缓存降采样结果
 
 # ── 范围限制 ──────────────────────────────────────────────
-WINDOW_SEC_MIN = 0.01
-WINDOW_SEC_MAX = 0.20
-AMP_SCALE_MIN  = 0.2
-AMP_SCALE_MAX  = 5.0
-SPEED_MUL_MIN  = 0.1
-SPEED_MUL_MAX  = 10.0
+WINDOW_SEC_MIN = 0.05
+WINDOW_SEC_MAX = 0.10
+AMP_SCALE_MIN  = 1.0
+AMP_SCALE_MAX  = 1.5
+SPEED_MUL_MIN  = 0.5
+SPEED_MUL_MAX  = 1.5
 
 # ── 数据驱动参数 ──────────────────────────────────────────
-Y_PERCENTILE   = 99.5
-SPACING_FACTOR = 3.2
+Y_PERCENTILE   = 99.9
+SPACING_FACTOR = 10.0
 
 # ── 配色 — 极简工业风 ─────────────────────────────────────
 COLOR_BG       = "#0A0A0A"   # 画布底色 — 极致深黑
@@ -48,7 +48,7 @@ COLOR_SLIDER   = "#2A2A30"   # 滑动条底色
 COLOR_HOVER    = "#353540"   # 按钮悬停
 
 # ── 字体 ──────────────────────────────────────────────────
-FONT_FAMILY = "Times New Roman"
+FONT_FAMILY = "Microsoft YaHei Mono"  # 等宽字体，适合信号显示
 FONT_SIZE   = 11
 FONT_SIZE_SMALL = 9
 
