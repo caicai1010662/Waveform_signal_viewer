@@ -21,6 +21,7 @@ class Player(QtCore.QObject):
     frame_ready = QtCore.pyqtSignal(int)
     state_changed = QtCore.pyqtSignal(bool)
     speed_changed = QtCore.pyqtSignal(float)
+    loop_changed = QtCore.pyqtSignal(bool)
 
     def __init__(self):
         super().__init__()
@@ -29,6 +30,7 @@ class Player(QtCore.QObject):
         self.n_samples: int = 0
         self.window_pts: int = 0
         self.speed_mul: float = 1.0
+        self.loop_mode: bool = True
         self._on = False
         self._pending = False
         self._timer = QtCore.QTimer(
@@ -85,6 +87,12 @@ class Player(QtCore.QObject):
                 self.set_speed(s)
                 return
 
+    # ── 循环 ──────────────────────────────────────────────
+
+    def toggle_loop(self):
+        self.loop_mode = not self.loop_mode
+        self.loop_changed.emit(self.loop_mode)
+
     # ── 内部 ──────────────────────────────────────────────
 
     def _tick(self):
@@ -96,8 +104,11 @@ class Player(QtCore.QObject):
                           * self.speed_mul / TARGET_FPS))
         self.ptr += step
         if self.ptr + self.window_pts >= self.n_samples:
-            self._pending = False
-            self.pause()
+            if self.loop_mode:
+                self.ptr = 0
+            else:
+                self._pending = False
+                self.pause()
 
     def ack(self):
         self._pending = False

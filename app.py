@@ -100,6 +100,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self._btn_play.setEnabled(False)
         bar.addWidget(self._btn_play)
 
+        self._btn_loop = QtWidgets.QPushButton("🔁 Loop")
+        self._btn_loop.setCheckable(True)
+        self._btn_loop.setChecked(True)
+        self._btn_loop.clicked.connect(self._player.toggle_loop)
+        self._btn_loop.setEnabled(False)
+        self._player.loop_changed.connect(self._on_loop_changed)
+        bar.addWidget(self._btn_loop)
+
         bar.addStretch(1)
 
         # 时窗滑动条
@@ -347,6 +355,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._slider_ch.setMaximum(max(0, self._sd.max_channel_offset))
                 self._slider_ch.setValue(0)
                 self._btn_play.setEnabled(True)
+                self._btn_loop.setEnabled(True)
                 self._slider_win.setEnabled(True)
                 self._slider_amp.setEnabled(True)
                 self._slider_speed.setEnabled(True)
@@ -399,6 +408,10 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_state(self, playing: bool):
         self._btn_play.setText("⏸  Pause" if playing else "▶  Play")
 
+    def _on_loop_changed(self, looping: bool):
+        self._btn_loop.setText("🔁 Loop" if looping else "🔁 One-Shot")
+        self._btn_loop.setChecked(looping)
+
     # ═══════════════════════════════════════════════════════════
     # 滑动条回调
     # ═══════════════════════════════════════════════════════════
@@ -435,7 +448,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._lbl_amp.setText(f"{scale:.1f}×")
 
         if self._mode != "scope":
-            self._grid.reload_amp(self._sd, self._sd.orig, self._sd.recon)
+            self._grid.reload_amp(self._sd)
         self._update_details()
 
     def _on_speed_slider(self, val: int):

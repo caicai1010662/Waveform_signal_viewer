@@ -143,6 +143,6 @@ QMessageBox QLabel {{
 """
 
 # ── pyqtgraph 全局配置 ────────────────────────────────────
-pg.setConfigOptions(antialias=True, useOpenGL=False)
+pg.setConfigOptions(antialias=False, useOpenGL=False)
 pg.setConfigOption('background', COLOR_BG)
 pg.setConfigOption('foreground', COLOR_GRID)

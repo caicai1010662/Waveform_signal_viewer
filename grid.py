@@ -1,11 +1,9 @@
 """
-grid.py — 网格视图
+grid.py — 网格视图（窗口裁剪 + 对象池）
 
-  GridView  : Row 模式 + Tile 模式，分块渲染，视口剔除
-              左侧 = 原始信号，右侧 = 重建信号
-
-  Row 模式: 一个通道一行，左右 ViewBox 同步
-  Tile 模式: 6 通道/行，各自独立小栅格
+  GridView  : Row 模式 + Tile 模式。
+              仅创建可见通道曲线（对象池），每条曲线只存当前时窗数据。
+              播放时每帧更新可见窗口，滚动时换绑通道 + 更新窗口。
 
   信号:
     channel_clicked(int) — 点击了某个通道（绝对索引）
@@ -19,18 +17,22 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from config import (COLOR_BG, COLOR_ORIG, COLOR_RECON, COLOR_GRID,
                      COLOR_TEXT, COLOR_SEP, TILE_COLS, VISIBLE_ROWS,
-                     VISIBLE_TILE_ROWS, LINE_WIDTH, SPACING_FACTOR,
-                     DECIMATION_TARGET, MINMAX_BUCKETS)
+                     VISIBLE_TILE_ROWS, LINE_WIDTH, SPACING_FACTOR)
 from data import SignalData
-from decimator import lttb, minmax
 from utils import make_font, make_pen, format_channel_label
+
+# 每条曲线最大点数 = 200ms × 30kHz ≈ 6000，远小于屏幕像素数时才降采样
+MAX_POINTS_PER_CURVE = 6000
 
 
 class GridView(QtWidgets.QWidget):
-    """网格视图 — 支持 Row 和 Tile 两种显示模式。
+    """网格视图 — 窗口裁剪 + 对象池。
 
-    Row 模式: 左侧 ViewBox (原始) + 右侧 ViewBox (重建)，通道垂直堆叠。
-    Tile 模式: 左侧栅格 (原始) + 右侧栅格 (重建)，6 列。
+    - Row 模式: VISIBLE_ROWS 条曲线/侧，一通道一行，垂直堆叠
+    - Tile 模式: VISIBLE_TILE_ROWS × TILE_COLS 个栅格/侧
+    - 每条曲线只存 window_pts 个点（不存全量时间序列）
+    - 播放: 每帧 setData 更新窗口
+    - 滚动: 换绑通道 + 更新窗口
     """
 
     channel_clicked = QtCore.pyqtSignal(int)
@@ -40,93 +42,84 @@ class GridView(QtWidgets.QWidget):
     def __init__(self, sd: SignalData):
         super().__init__()
         self._sd = sd
-        self._mode = "row"          # "row" | "tile"
+        self._mode = "row"
         self._y_offsets: np.ndarray = None
         self._total_height: float = 0.0
-        self._visible_start: int = 0   # 当前可见起始通道 (行索引)
-        self._t_buf = np.empty(0, dtype=np.float32)
+        self._ch_offset: int = 0
+        self._last_ptr: int = -1          # 上次渲染的 ptr，避免重复更新
 
-        # 曲线缓存: key=ch, value=PlotDataItem
-        self._curves_orig: dict[int, pg.PlotDataItem] = {}
-        self._curves_recon: dict[int, pg.PlotDataItem] = {}
-        # 标签缓存
-        self._labels: dict[int, pg.TextItem] = {}
-        # Tile 模式: (row, col) → (PlotItem, curve)
+        # 对象池（只存可见数量）
+        self._curves_orig: list[pg.PlotDataItem] = []
+        self._curves_recon: list[pg.PlotDataItem] = []
+        self._labels: list[pg.TextItem] = []
         self._tiles_orig: dict[tuple, tuple] = {}
         self._tiles_recon: dict[tuple, tuple] = {}
 
         self._build_ui()
 
     # ═══════════════════════════════════════════════════════════
-    # UI 构建
+    # UI 框架（只执行一次）
     # ═══════════════════════════════════════════════════════════
 
     def _build_ui(self):
-        """构建双层布局：row_layout 和 tile_layout 叠加，按模式切换可见。"""
         root = QtWidgets.QStackedLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # ── Row 模式容器 ──────────────────────────────────
+        # ── Row 模式 ─────────────────────────────────────
         self._row_widget = QtWidgets.QWidget()
-        row_layout = QtWidgets.QHBoxLayout(self._row_widget)
-        row_layout.setContentsMargins(0, 0, 0, 0)
-        row_layout.setSpacing(0)
+        row_lay = QtWidgets.QHBoxLayout(self._row_widget)
+        row_lay.setContentsMargins(0, 0, 0, 0)
+        row_lay.setSpacing(0)
 
-        # 左侧 ViewBox — 原始信号
         self._left_pw = pg.PlotWidget(background=COLOR_BG)
         self._left_pi = self._left_pw.getPlotItem()
         self._left_vb = self._left_pi.getViewBox()
         self._config_plot(self._left_pi)
 
-        # 右侧 ViewBox — 重建信号
         self._right_pw = pg.PlotWidget(background=COLOR_BG)
         self._right_pi = self._right_pw.getPlotItem()
         self._right_vb = self._right_pi.getViewBox()
         self._config_plot(self._right_pi)
 
-        # 同步 Y 轴
         self._left_vb.sigYRangeChanged.connect(self._sync_y_range)
 
-        row_layout.addWidget(self._left_pw, 1)
-        # 中间分隔
-        sep = QtWidgets.QFrame()
-        sep.setFrameShape(QtWidgets.QFrame.VLine)
-        sep.setStyleSheet(f"border: none; background-color: {COLOR_SEP};")
-        sep.setFixedWidth(1)
-        row_layout.addWidget(sep)
-        row_layout.addWidget(self._right_pw, 1)
+        row_lay.addWidget(self._left_pw, 1)
+        row_lay.addWidget(self._make_vsep())
+        row_lay.addWidget(self._right_pw, 1)
 
-        # ── Tile 模式容器 ─────────────────────────────────
+        # ── Tile 模式 ────────────────────────────────────
         self._tile_widget = QtWidgets.QWidget()
-        tile_layout = QtWidgets.QHBoxLayout(self._tile_widget)
-        tile_layout.setContentsMargins(0, 0, 0, 0)
-        tile_layout.setSpacing(0)
+        tile_lay = QtWidgets.QHBoxLayout(self._tile_widget)
+        tile_lay.setContentsMargins(0, 0, 0, 0)
+        tile_lay.setSpacing(0)
 
         self._tile_left = pg.GraphicsLayoutWidget()
         self._tile_left.setBackground(COLOR_BG)
         self._tile_right = pg.GraphicsLayoutWidget()
         self._tile_right.setBackground(COLOR_BG)
-        tile_layout.addWidget(self._tile_left, 1)
 
-        sep2 = QtWidgets.QFrame()
-        sep2.setFrameShape(QtWidgets.QFrame.VLine)
-        sep2.setStyleSheet(f"border: none; background-color: {COLOR_SEP};")
-        sep2.setFixedWidth(1)
-        tile_layout.addWidget(sep2)
-        tile_layout.addWidget(self._tile_right, 1)
+        tile_lay.addWidget(self._tile_left, 1)
+        tile_lay.addWidget(self._make_vsep())
+        tile_lay.addWidget(self._tile_right, 1)
 
         root.addWidget(self._row_widget)
         root.addWidget(self._tile_widget)
 
-        # ── 事件过滤 ──────────────────────────────────────
         self._left_pw.viewport().installEventFilter(self)
         self._right_pw.viewport().installEventFilter(self)
         self._left_pw.scene().installEventFilter(self)
         self._right_pw.scene().installEventFilter(self)
 
+    @staticmethod
+    def _make_vsep():
+        f = QtWidgets.QFrame()
+        f.setFrameShape(QtWidgets.QFrame.VLine)
+        f.setStyleSheet(f"border: none; background-color: {COLOR_SEP};")
+        f.setFixedWidth(1)
+        return f
+
     def _config_plot(self, pi: pg.PlotItem):
-        """配置 PlotItem 通用属性。"""
         pi.hideButtons()
         pi.setMouseEnabled(x=False, y=False)
         pi.setMenuEnabled(False)
@@ -142,165 +135,126 @@ class GridView(QtWidgets.QWidget):
         return self._mode
 
     def set_mode(self, mode: str):
-        """切换显示模式: "row" | "tile" """
         if mode == self._mode:
             return
         self._mode = mode
         self.clear()
         stack: QtWidgets.QStackedLayout = self.layout()
-        if mode == "row":
-            stack.setCurrentIndex(0)
-        else:
-            stack.setCurrentIndex(1)
+        stack.setCurrentIndex(0 if mode == "row" else 1)
+        self._ch_offset = 0
+        self._last_ptr = -1
         if self._sd.ready:
             self.build()
-            self._render_visible()
+            self.set_offset(self._sd, 0)
 
     # ═══════════════════════════════════════════════════════════
-    # 构建 / 清理
+    # 构建 — 仅创建可见数量的曲线对象（对象池）
     # ═══════════════════════════════════════════════════════════
 
     def build(self):
-        """(重)构建所有曲线对象。"""
         self.clear()
         sd = self._sd
         if not sd.ready:
             return
 
-        if self._mode == "row":
-            self._build_row()
-        else:
-            self._build_tile()
-
-    def _build_row(self):
-        """Row 模式：为所有通道创建曲线（左右各一），设置 Y 偏移。"""
-        sd = self._sd
         self._y_offsets = sd.y_offsets_all()
         self._total_height = float(sd.total_y_height)
+        self._ch_offset = 0
+        self._last_ptr = -1
 
-        font = make_font(8)
+        if self._mode == "row":
+            self._build_row_pool(sd)
+        else:
+            self._build_tile_pool(sd)
 
-        for ch in range(sd.n_chan):
-            offset = float(self._y_offsets[ch])
-
-            # 左侧 — 原始信号
-            c_orig = self._left_pi.plot(
-                pen=make_pen(COLOR_ORIG, LINE_WIDTH))
-            c_orig.setDownsampling(auto=False)
-            c_orig.setSkipFiniteCheck(True)
-            self._curves_orig[ch] = c_orig
-
-            # 右侧 — 重建信号
-            c_recon = self._right_pi.plot(
-                pen=make_pen(COLOR_RECON, LINE_WIDTH))
-            c_recon.setDownsampling(auto=False)
-            c_recon.setSkipFiniteCheck(True)
-            self._curves_recon[ch] = c_recon
-
-            # 通道标签（仅左侧）
-            lbl = pg.TextItem(format_channel_label(ch),
-                              color=COLOR_TEXT, anchor=(0, 0.5))
-            lbl.setFont(font)
-            self._left_pi.addItem(lbl)
-            lbl.setPos(0.0005, offset)
-            self._labels[ch] = lbl
-
-        # 初始数据加载
-        self._load_all_row_data(sd)
-
-        # X/Y 范围
+    def _build_row_pool(self, sd: SignalData):
+        """Row 模式：创建 VISIBLE_ROWS 条曲线对象（空池，等数据填充）。"""
+        n_pool = min(VISIBLE_ROWS, sd.n_chan)
         w = sd.window_sec
+
+        for _ in range(n_pool):
+            c_l = self._left_pi.plot(pen=make_pen(COLOR_ORIG, LINE_WIDTH))
+            c_l.setDownsampling(auto=False)
+            c_l.setSkipFiniteCheck(True)
+            self._curves_orig.append(c_l)
+
+            c_r = self._right_pi.plot(pen=make_pen(COLOR_RECON, LINE_WIDTH))
+            c_r.setDownsampling(auto=False)
+            c_r.setSkipFiniteCheck(True)
+            self._curves_recon.append(c_r)
+
+            lbl = pg.TextItem("", color=COLOR_TEXT, anchor=(0, 0.5))
+            lbl.setFont(make_font(8))
+            self._left_pi.addItem(lbl)
+            self._labels.append(lbl)
+
+        # 填充初始数据
+        self._fill_row_data(sd, 0)
+
+        # 固定 X 范围
         self._left_vb.setXRange(0, w, padding=0)
         self._right_vb.setXRange(0, w, padding=0)
 
-        n_show = min(VISIBLE_ROWS, sd.n_chan)
+        # Y 范围
         row_h = self._total_height / max(1, sd.n_chan)
         self._left_vb.setYRange(
-            self._total_height - n_show * row_h, self._total_height, padding=0)
+            max(0, self._total_height - n_pool * row_h),
+            self._total_height, padding=0)
         self._right_vb.setYRange(
-            self._total_height - n_show * row_h, self._total_height, padding=0)
+            max(0, self._total_height - n_pool * row_h),
+            self._total_height, padding=0)
 
-    def _load_all_row_data(self, sd: SignalData):
-        """Row 模式：全量数据写入曲线（首次构建 / 幅值变化时）。"""
-        if not sd.ready:
-            return
-        t = np.arange(sd.n_samples, dtype=np.float32) / sd.s_freq
-        for ch in range(sd.n_chan):
-            offset = float(self._y_offsets[ch])
-            if ch in self._curves_orig:
-                self._curves_orig[ch].setData(
-                    t, sd.orig[ch, :] + offset)
-            if ch in self._curves_recon:
-                self._curves_recon[ch].setData(
-                    t, sd.recon[ch, :] + offset)
+    def _build_tile_pool(self, sd: SignalData):
+        """Tile 模式：创建可见栅格。"""
+        n_rows = min(VISIBLE_TILE_ROWS,
+                     (sd.n_chan + TILE_COLS - 1) // TILE_COLS)
+        w = sd.window_sec
+        font = make_font(7)
 
-    def _build_tile(self):
-        """Tile 模式：创建 TILE_COLS × N 栅格网格。"""
-        sd = self._sd
-        n_rows = (sd.n_chan + TILE_COLS - 1) // TILE_COLS
+        for r in range(n_rows):
+            for c in range(TILE_COLS):
+                abs_ch = r * TILE_COLS + c
+                if abs_ch >= sd.n_chan:
+                    break
+                ch_amp = float(sd.ch_amp[abs_ch]) * sd.amp_scale
+                y_lo, y_hi = -ch_amp * 1.2, ch_amp * 1.2
 
-        for side, glw, curves_dict, tiles_dict in [
-            ("orig", self._tile_left, self._curves_orig, self._tiles_orig),
-            ("recon", self._tile_right, self._curves_recon, self._tiles_recon)
-        ]:
-            glw.clear()
-            curves_dict.clear()
-            tiles_dict.clear()
+                pi_l = self._tile_left.addPlot(row=r, col=c)
+                self._config_tile_plot(pi_l, abs_ch, font, y_lo, y_hi)
+                c_l = pi_l.plot(pen=make_pen(COLOR_ORIG, 0.4))
+                c_l.setDownsampling(auto=False)
+                c_l.setSkipFiniteCheck(True)
+                self._tiles_orig[(r, c)] = (pi_l, c_l)
 
-        self._y_offsets = sd.y_offsets_all()
-        labels_font = make_font(7)
+                pi_r = self._tile_right.addPlot(row=r, col=c)
+                self._config_tile_plot(pi_r, abs_ch, font, y_lo, y_hi)
+                c_r = pi_r.plot(pen=make_pen(COLOR_RECON, 0.4))
+                c_r.setDownsampling(auto=False)
+                c_r.setSkipFiniteCheck(True)
+                self._tiles_recon[(r, c)] = (pi_r, c_r)
 
-        for ch in range(sd.n_chan):
-            row = ch // TILE_COLS
-            col = ch % TILE_COLS
+        self._fill_tile_data(sd, 0)
 
-            # 左侧 tile
-            pi_l = self._tile_left.addPlot(row=row, col=col)
-            self._config_tile_plot(pi_l, ch, labels_font)
-            c_l = pi_l.plot(pen=make_pen(COLOR_ORIG, 0.4))
-            c_l.setDownsampling(auto=False)
-            c_l.setSkipFiniteCheck(True)
-            self._tiles_orig[(row, col)] = (pi_l, c_l)
-            self._curves_orig[ch] = c_l
+        for pi, _ in list(self._tiles_orig.values()):
+            pi.setXRange(0, w, padding=0)
+        for pi, _ in list(self._tiles_recon.values()):
+            pi.setXRange(0, w, padding=0)
 
-            # 右侧 tile
-            pi_r = self._tile_right.addPlot(row=row, col=col)
-            self._config_tile_plot(pi_r, ch, labels_font)
-            c_r = pi_r.plot(pen=make_pen(COLOR_RECON, 0.4))
-            c_r.setDownsampling(auto=False)
-            c_r.setSkipFiniteCheck(True)
-            self._tiles_recon[(row, col)] = (pi_r, c_r)
-            self._curves_recon[ch] = c_r
-
-        # 加载数据
-        self._load_all_tile_data(sd)
-
-    def _config_tile_plot(self, pi: pg.PlotItem, ch: int, font: QtGui.QFont):
-        """配置 Tile 中的单个小 PlotItem。"""
+    def _config_tile_plot(self, pi: pg.PlotItem, ch: int,
+                          font: QtGui.QFont, y_lo: float, y_hi: float):
         pi.hideButtons()
         pi.setMouseEnabled(x=False, y=False)
         pi.setMenuEnabled(False)
         pi.hideAxis('left')
         pi.hideAxis('bottom')
+        pi.setYRange(y_lo, y_hi, padding=0)
         label = pg.TextItem(format_channel_label(ch),
                             color=COLOR_TEXT, anchor=(0, 0.5))
         label.setFont(font)
         pi.addItem(label)
         label.setPos(0, 0)
 
-    def _load_all_tile_data(self, sd: SignalData):
-        """Tile 模式：全量数据写入所有栅格曲线。"""
-        if not sd.ready:
-            return
-        t = np.arange(sd.n_samples, dtype=np.float32) / sd.s_freq
-        for ch in range(sd.n_chan):
-            if ch in self._curves_orig:
-                self._curves_orig[ch].setData(t, sd.orig[ch, :])
-            if ch in self._curves_recon:
-                self._curves_recon[ch].setData(t, sd.recon[ch, :])
-
     def clear(self):
-        """清理所有曲线和标签。"""
         self._left_pi.clear()
         self._right_pi.clear()
         self._tile_left.clear()
@@ -312,11 +266,70 @@ class GridView(QtWidgets.QWidget):
         self._tiles_recon.clear()
 
     # ═══════════════════════════════════════════════════════════
+    # 数据填充 — 只加载当前窗口的采样点
+    # ═══════════════════════════════════════════════════════════
+
+    def _fill_row_data(self, sd: SignalData, ptr: int):
+        """Row 模式：给对象池曲线填充当前窗口数据。"""
+        wp = sd.window_pts
+        if ptr + wp > sd.n_samples:
+            ptr = max(0, sd.n_samples - wp)
+        t_slice = slice(ptr, ptr + wp)
+        t = np.arange(wp, dtype=np.float32) / sd.s_freq
+
+        # 按屏幕像素裁剪
+        t, wp = _clip_to_screen(t, wp)
+
+        n_pool = len(self._curves_orig)
+        for i in range(n_pool):
+            abs_ch = self._ch_offset + i
+            if abs_ch >= sd.n_chan:
+                self._curves_orig[i].setVisible(False)
+                self._curves_recon[i].setVisible(False)
+                self._labels[i].setText("")
+                continue
+            self._curves_orig[i].setVisible(True)
+            self._curves_recon[i].setVisible(True)
+
+            offset = float(self._y_offsets[abs_ch])
+            self._curves_orig[i].setData(
+                t, sd.orig[abs_ch, t_slice][:wp] + offset)
+            self._curves_recon[i].setData(
+                t, sd.recon[abs_ch, t_slice][:wp] + offset)
+            self._labels[i].setText(format_channel_label(abs_ch))
+            self._labels[i].setPos(0.0005, offset)
+
+    def _fill_tile_data(self, sd: SignalData, ptr: int):
+        """Tile 模式：给可见栅格填充当前窗口数据。"""
+        wp = sd.window_pts
+        if ptr + wp > sd.n_samples:
+            ptr = max(0, sd.n_samples - wp)
+        t_slice = slice(ptr, ptr + wp)
+        t = np.arange(wp, dtype=np.float32) / sd.s_freq
+        t, wp = _clip_to_screen(t, wp)
+
+        for (r, c), (pi, curve) in list(self._tiles_orig.items()):
+            abs_ch = self._ch_offset + r * TILE_COLS + c
+            if abs_ch >= sd.n_chan:
+                continue
+            ch_amp = float(sd.ch_amp[abs_ch]) * sd.amp_scale
+            pi.setYRange(-ch_amp * 1.2, ch_amp * 1.2, padding=0)
+            curve.setData(t, sd.orig[abs_ch, t_slice][:wp])
+            _update_tile_label(pi, abs_ch)
+
+        for (r, c), (pi, curve) in list(self._tiles_recon.items()):
+            abs_ch = self._ch_offset + r * TILE_COLS + c
+            if abs_ch >= sd.n_chan:
+                continue
+            ch_amp = float(sd.ch_amp[abs_ch]) * sd.amp_scale
+            pi.setYRange(-ch_amp * 1.2, ch_amp * 1.2, padding=0)
+            curve.setData(t, sd.recon[abs_ch, t_slice][:wp])
+
+    # ═══════════════════════════════════════════════════════════
     # 视口同步
     # ═══════════════════════════════════════════════════════════
 
     def _sync_y_range(self, vb, range_):
-        """左侧 Y 变化 → 同步右侧。"""
         try:
             self._right_vb.blockSignals(True)
             self._right_vb.setYRange(*range_, padding=0)
@@ -324,93 +337,83 @@ class GridView(QtWidgets.QWidget):
             self._right_vb.blockSignals(False)
 
     # ═══════════════════════════════════════════════════════════
-    # 播放滚动
+    # 播放 — 每帧更新窗口数据
     # ═══════════════════════════════════════════════════════════
 
     def scroll(self, ptr: int, sd: SignalData):
-        """播放时平移 X 视口（热路径，零分配）。"""
-        t0 = ptr / sd.s_freq
-        w = sd.window_sec
-        if self._mode == "row":
-            self._left_vb.setXRange(t0, t0 + w, padding=0)
-            self._right_vb.setXRange(t0, t0 + w, padding=0)
-        else:
-            # Tile 模式：更新所有可见 tile 的 X 范围
-            self._update_tile_x_ranges(t0, w)
+        """播放时每帧调用：更新可见通道的窗口数据。
 
-    def _update_tile_x_ranges(self, t0: float, w: float):
-        """Tile 模式更新 X 范围（所有 tile）。"""
-        for pi, _ in self._tiles_orig.values():
-            pi.setXRange(t0, t0 + w, padding=0)
-        for pi, _ in self._tiles_recon.values():
-            pi.setXRange(t0, t0 + w, padding=0)
+        如果 ptr 没变就跳过（避免重复渲染）。
+        """
+        if ptr == self._last_ptr:
+            return
+        self._last_ptr = ptr
+
+        if self._mode == "row":
+            self._fill_row_data(sd, ptr)
+        else:
+            self._fill_tile_data(sd, ptr)
 
     # ═══════════════════════════════════════════════════════════
-    # 通道滚动
+    # 通道滚动 — 换绑通道 + 填充当前窗口数据
     # ═══════════════════════════════════════════════════════════
 
     def set_offset(self, sd: SignalData, val: int):
-        """竖向浏览：调整 Y 视口到目标行。"""
-        self._visible_start = val
+        """竖向浏览：更新可见通道范围 + 重新填充数据。"""
         if not sd.ready:
             return
+        val = max(0, min(val, sd.max_channel_offset))
+        if val == self._ch_offset:
+            return
+        self._ch_offset = val
 
         if self._mode == "row":
-            n_total = max(1, sd.n_chan)
-            n_visible = min(VISIBLE_ROWS, n_total)
-            row_h = self._total_height / n_total
-            bot = self._total_height - (val + n_visible) * row_h
-            top = self._total_height - val * row_h
-            bot = max(0, bot)
-            self._left_vb.setYRange(bot, top, padding=0)
-            self._right_vb.setYRange(bot, top, padding=0)
+            self._fill_row_data(sd, self._last_ptr if self._last_ptr >= 0 else 0)
+            # 更新 Y 视口
+            n_pool = len(self._curves_orig)
+            row_h = self._total_height / max(1, sd.n_chan)
+            y_top = self._total_height - self._ch_offset * row_h
+            y_bot = max(0, y_top - n_pool * row_h)
+            self._left_vb.setYRange(y_bot, y_top, padding=0)
+            self._right_vb.setYRange(y_bot, y_top, padding=0)
+        else:
+            self._fill_tile_data(sd, self._last_ptr if self._last_ptr >= 0 else 0)
 
     # ═══════════════════════════════════════════════════════════
     # 范围更新
     # ═══════════════════════════════════════════════════════════
 
     def update_ranges(self, sd: SignalData):
-        """时窗变化时更新 X 范围。"""
+        """时窗变化：更新 X 范围 + 重新填充数据。"""
         w = sd.window_sec
         if self._mode == "row":
             self._left_vb.setXRange(0, w, padding=0)
             self._right_vb.setXRange(0, w, padding=0)
+            self._fill_row_data(sd, self._last_ptr if self._last_ptr >= 0 else 0)
         else:
-            self._update_tile_x_ranges(0, w)
+            for pi, _ in list(self._tiles_orig.values()):
+                pi.setXRange(0, w, padding=0)
+            for pi, _ in list(self._tiles_recon.values()):
+                pi.setXRange(0, w, padding=0)
+            self._fill_tile_data(sd, self._last_ptr if self._last_ptr >= 0 else 0)
 
-    def reload_amp(self, sd: SignalData, data_orig: np.ndarray,
-                   data_recon: np.ndarray):
-        """幅值变化：重建 Y 偏移 + 重写曲线数据。"""
+    def reload_amp(self, sd: SignalData):
+        """幅值缩放：重算 Y 偏移 + 更新数据 + Y 范围。"""
         if not sd.ready:
             return
         self._y_offsets = sd.y_offsets_all()
         self._total_height = float(sd.total_y_height)
 
         if self._mode == "row":
-            self._load_all_row_data(sd)
-            n_show = min(VISIBLE_ROWS, max(1, sd.n_chan))
+            self._fill_row_data(sd, self._last_ptr if self._last_ptr >= 0 else 0)
+            n_pool = len(self._curves_orig)
             row_h = self._total_height / max(1, sd.n_chan)
-            self._left_vb.setYRange(
-                self._total_height - n_show * row_h,
-                self._total_height, padding=0)
-            self._right_vb.setYRange(
-                self._total_height - n_show * row_h,
-                self._total_height, padding=0)
-            # 更新标签位置
-            for ch in range(sd.n_chan):
-                if ch in self._labels:
-                    self._labels[ch].setPos(
-                        0.0005, float(self._y_offsets[ch]))
+            y_top = self._total_height - self._ch_offset * row_h
+            y_bot = max(0, y_top - n_pool * row_h)
+            self._left_vb.setYRange(y_bot, y_top, padding=0)
+            self._right_vb.setYRange(y_bot, y_top, padding=0)
         else:
-            self._load_all_tile_data(sd)
-
-    # ═══════════════════════════════════════════════════════════
-    # 渲染可见通道（视口剔除）
-    # ═══════════════════════════════════════════════════════════
-
-    def _render_visible(self):
-        """仅渲染视口内可见的通道。用于初始加载后和滚动时调用。"""
-        pass  # Row 模式: 全量数据已 setData, 播放仅平移 ViewBox, 零重绘
+            self._fill_tile_data(sd, self._last_ptr if self._last_ptr >= 0 else 0)
 
     # ═══════════════════════════════════════════════════════════
     # 事件过滤
@@ -420,7 +423,6 @@ class GridView(QtWidgets.QWidget):
         if not self._sd.ready or self._y_offsets is None:
             return False
 
-        # 滚轮 → 时窗 / 幅值
         if event.type() == QtCore.QEvent.Wheel:
             delta = 1 if event.angleDelta().y() > 0 else -1
             modifiers = QtWidgets.QApplication.instance().keyboardModifiers()
@@ -430,15 +432,12 @@ class GridView(QtWidgets.QWidget):
                 self.wheel_time.emit(delta)
             return False
 
-        # 左键点击 → 找最近的 Y offset → 触发 channel_clicked
         if (event.type() == QtCore.QEvent.MouseButtonRelease
                 and event.button() == QtCore.Qt.LeftButton):
             if self._mode == "row":
-                # 确定事件来源的 PlotWidget
                 pw = self._left_pw if obj in (
                     self._left_pw.viewport(),
                     self._left_pw.scene()) else self._right_pw
-                # 将 viewport 像素坐标转换为数据坐标
                 vb = pw.getPlotItem().getViewBox()
                 data_pt = vb.mapToView(pg.Point(event.pos()))
                 y = float(data_pt.y())
@@ -448,3 +447,22 @@ class GridView(QtWidgets.QWidget):
                 return True
 
         return False
+
+
+# ═══════════════════════════════════════════════════════════════
+# 工具函数
+# ═══════════════════════════════════════════════════════════════
+
+def _clip_to_screen(t: np.ndarray, wp: int) -> tuple[np.ndarray, int]:
+    """如果点数超过屏幕分辨率，做简单的降采样（每隔 N 个取 1 个）。"""
+    if wp > MAX_POINTS_PER_CURVE:
+        step = wp // MAX_POINTS_PER_CURVE + 1
+        return t[::step], len(t[::step])
+    return t, wp
+
+
+def _update_tile_label(pi: pg.PlotItem, ch: int):
+    for item in pi.items:
+        if isinstance(item, pg.TextItem):
+            item.setText(format_channel_label(ch))
+            break
