@@ -20,21 +20,21 @@ from config import FONT_FAMILY, FONT_SIZE, FONT_SIZE_SMALL
 # ═══════════════════════════════════════════════════════════════
 
 @lru_cache(maxsize=32)
-def make_font(size: int = FONT_SIZE, weight: int = 700) -> QtGui.QFont:
+def make_font(size: int = FONT_SIZE, bold: bool = True) -> QtGui.QFont:
     """创建字体对象。默认加粗。
 
     Args:
-        size:   字号。默认从 config.FONT_SIZE 读取（16px）
-        weight: 粗细。700=加粗（默认）, 400=正常
+        size: 字号。默认从 config.FONT_SIZE 读取（16px）
+        bold: True=加粗（默认）, False=正常
 
     用法:
         font = make_font(12)         # 12px 加粗
-        font = make_font(14, 400)    # 14px 正常
+        font = make_font(14, False)  # 14px 正常
 
     缓存: 同样参数只创建一次，后续调用直接返回缓存对象。
     """
     font = QtGui.QFont(FONT_FAMILY, size)
-    font.setWeight(weight)
+    font.setBold(bold)
     return font
 
 
@@ -77,12 +77,14 @@ def format_channel_label(ch: int) -> str:
 # ═══════════════════════════════════════════════════════════════
 
 def make_fixed_label(text: str, font_size: int = FONT_SIZE_SMALL,
-                     color: str = "#A0A0A0") -> pg.TextItem:
+                     bold: bool = True,
+                     color: str = "#FFFFFF") -> pg.TextItem:
     """在波形图上创建固定位置的文本标签。
 
     Args:
         text:      显示的文本
         font_size: 字号
+        bold:      True=加粗（默认）, False=正常
         color:     文字颜色
 
     返回:
@@ -91,5 +93,5 @@ def make_fixed_label(text: str, font_size: int = FONT_SIZE_SMALL,
     from config import COLOR_TEXT
     c = color if color else COLOR_TEXT
     label = pg.TextItem(text, color=c, anchor=(0, 0.5))  # 左侧垂直居中锚点
-    label.setFont(make_font(font_size))
+    label.setFont(make_font(font_size, bold))
     return label

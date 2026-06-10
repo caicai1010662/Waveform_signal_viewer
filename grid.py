@@ -30,7 +30,7 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 from config import (COLOR_BG, COLOR_CARD, COLOR_ORIG, COLOR_RECON, COLOR_GRID,
                      COLOR_TEXT, COLOR_SEP, COLOR_ZEBRA, TILE_COLS,
                      VISIBLE_ROWS, VISIBLE_TILE_ROWS, LINE_WIDTH,
-                     SPACING_FACTOR)
+                     SPACING_FACTOR, FONT_SIZE)
 from data import SignalData
 from utils import make_font, make_pen, format_channel_label
 
@@ -73,7 +73,8 @@ class GridView(QtWidgets.QWidget):
         self._labels_r: list[pg.TextItem] = []           # 右侧通道标签
         self._zero_lines_l: list[pg.InfiniteLine] = []   # 左侧零基线
         self._zero_lines_r: list[pg.InfiniteLine] = []   # 右侧零基线
-        self._zebra_rects: list[pg.LinearRegionItem] = [] # 斑马纹交替行
+        self._zebra_rects: list[pg.LinearRegionItem] = []   # 左侧斑马纹
+        self._zebra_rects_r: list[pg.LinearRegionItem] = [] # 右侧斑马纹
 
         # ── 时间轴缓冲区（复用，避免每帧分配 numpy 数组）───
         self._t_buf = np.empty(0, dtype=np.float32)
@@ -134,12 +135,15 @@ class GridView(QtWidgets.QWidget):
         tile_lay.setContentsMargins(0, 0, 0, 0)
         tile_lay.setSpacing(0)
 
-        # 左侧栅格 — 原始信号
+        # 左侧栅格 — 容器深色底 + 2px 格子间距 = 天然网格线
         self._tile_left = pg.GraphicsLayoutWidget()
-        self._tile_left.setBackground(COLOR_CARD)
-        # 右侧栅格 — 重建信号
+        self._tile_left.setBackground(COLOR_BG)
+        self._tile_left.ci.layout.setSpacing(2)
+
+        # 右侧栅格 — 同上
         self._tile_right = pg.GraphicsLayoutWidget()
-        self._tile_right.setBackground(COLOR_CARD)
+        self._tile_right.setBackground(COLOR_BG)
+        self._tile_right.ci.layout.setSpacing(2)
 
         tile_lay.addWidget(self._tile_left, 1)
         tile_lay.addWidget(self._make_vsep())
@@ -231,14 +235,25 @@ class GridView(QtWidgets.QWidget):
         for i in range(n_pool):
             if i % 2 == 1:
                 continue  # 只给偶数行加斑马纹
-            zebra = pg.LinearRegionItem(
+            # 左侧斑马纹
+            zebra_l = pg.LinearRegionItem(
                 values=[0, 1],
                 orientation='horizontal',
                 brush=pg.mkBrush(COLOR_ZEBRA),
                 pen=pg.mkPen(None))           # 无边框
-            zebra.setMovable(False)           # 用户不可拖动
-            self._left_pi.addItem(zebra)
-            self._zebra_rects.append(zebra)
+            zebra_l.setMovable(False)         # 用户不可拖动
+            self._left_pi.addItem(zebra_l)
+            self._zebra_rects.append(zebra_l)
+
+            # 右侧斑马纹 — 贯穿左右，形成完整水平阅读参考带
+            zebra_r = pg.LinearRegionItem(
+                values=[0, 1],
+                orientation='horizontal',
+                brush=pg.mkBrush(COLOR_ZEBRA),
+                pen=pg.mkPen(None))
+            zebra_r.setMovable(False)
+            self._right_pi.addItem(zebra_r)
+            self._zebra_rects_r.append(zebra_r)
 
         # ── 曲线 + 零线 + 标签 ────────────────────────────
         for i in range(n_pool):
@@ -269,13 +284,21 @@ class GridView(QtWidgets.QWidget):
             # 标签底色动态匹配：偶数行(斑马纹)用 COLOR_ZEBRA，奇数行用 COLOR_CARD
             bg_color = COLOR_ZEBRA if i % 2 == 0 else COLOR_CARD
 
-            # 左侧标签 — Z 值 100 绝对置顶，波形永远从文字下方穿过
-            lbl_l = pg.TextItem("", color=COLOR_TEXT, anchor=(0, 0.5),
+            # 左侧标签 — anchor=(0,1)=左下角锚点，FONT_SIZE_SMALL 统一字号
+            lbl_l = pg.TextItem("", color=COLOR_TEXT, anchor=(0, 1),
                                 fill=pg.mkBrush(bg_color))
-            lbl_l.setFont(make_font(8))
+            lbl_l.setFont(make_font(FONT_SIZE))
             lbl_l.setZValue(100)
             self._left_pi.addItem(lbl_l)
             self._labels_l.append(lbl_l)
+
+            # 右侧标签 — 同样左下角锚点，对称排布
+            lbl_r = pg.TextItem("", color=COLOR_TEXT, anchor=(0, 1),
+                                fill=pg.mkBrush(bg_color))
+            lbl_r.setFont(make_font(FONT_SIZE))
+            lbl_r.setZValue(100)
+            self._right_pi.addItem(lbl_r)
+            self._labels_r.append(lbl_r)
 
         # 填充初始数据（含斑马纹真实高度 + 标签位置）
         self._fill_row_data(sd, 0)
@@ -297,7 +320,7 @@ class GridView(QtWidgets.QWidget):
         n_rows = min(VISIBLE_TILE_ROWS,
                      (sd.n_chan + TILE_COLS - 1) // TILE_COLS)
         w = sd.window_sec
-        font = make_font(7)
+        font = make_font(FONT_SIZE)
 
         for r in range(n_rows):
             for c in range(TILE_COLS):
@@ -310,8 +333,8 @@ class GridView(QtWidgets.QWidget):
                 # 左侧 tile
                 pi_l = self._tile_left.addPlot(row=r, col=c)
                 self._config_tile_plot(pi_l, abs_ch, font, y_lo, y_hi)
-                _add_tile_zero_line(pi_l, y_lo, y_hi)
-                c_l = pi_l.plot(pen=make_pen(COLOR_ORIG, 0.4))
+                _add_tile_zero_line(pi_l)
+                c_l = pi_l.plot(pen=make_pen(COLOR_ORIG, LINE_WIDTH))
                 c_l.setDownsampling(auto=False)
                 c_l.setSkipFiniteCheck(True)
                 self._tiles_orig[(r, c)] = (pi_l, c_l)
@@ -319,8 +342,8 @@ class GridView(QtWidgets.QWidget):
                 # 右侧 tile
                 pi_r = self._tile_right.addPlot(row=r, col=c)
                 self._config_tile_plot(pi_r, abs_ch, font, y_lo, y_hi)
-                _add_tile_zero_line(pi_r, y_lo, y_hi)
-                c_r = pi_r.plot(pen=make_pen(COLOR_RECON, 0.4))
+                _add_tile_zero_line(pi_r)
+                c_r = pi_r.plot(pen=make_pen(COLOR_RECON, LINE_WIDTH))
                 c_r.setDownsampling(auto=False)
                 c_r.setSkipFiniteCheck(True)
                 self._tiles_recon[(r, c)] = (pi_r, c_r)
@@ -335,17 +358,22 @@ class GridView(QtWidgets.QWidget):
     def _config_tile_plot(self, pi: pg.PlotItem, ch: int,
                           font: QtGui.QFont, y_lo: float, y_hi: float):
         """配置单个 Tile 的 PlotItem。"""
+        pi.getViewBox().setBackgroundColor(COLOR_CARD)  # 每个格子刷卡片色
         pi.hideButtons()
         pi.setMouseEnabled(x=False, y=False)
         pi.setMenuEnabled(False)
         pi.hideAxis('left')
         pi.hideAxis('bottom')
         pi.setYRange(y_lo, y_hi, padding=0)
+        # 标签 — 左下角锚点 + 底色，与 Compare 模式统一
         label = pg.TextItem(format_channel_label(ch),
-                            color=COLOR_TEXT, anchor=(0, 0.5))
+                            color=COLOR_TEXT, anchor=(0, 1),
+                            fill=pg.mkBrush(COLOR_CARD))
         label.setFont(font)
+        label.setZValue(100)
         pi.addItem(label)
-        label.setPos(0, 0)
+        # 左下角定位：贴底边 + 2% 留白
+        label.setPos(0, y_lo + (y_hi - y_lo) * 0.02)
 
     def clear(self):
         """清空所有曲线、标签、零线、斑马纹、tile。
@@ -363,6 +391,7 @@ class GridView(QtWidgets.QWidget):
         self._zero_lines_l.clear()
         self._zero_lines_r.clear()
         self._zebra_rects.clear()
+        self._zebra_rects_r.clear()
         self._tiles_orig.clear()
         self._tiles_recon.clear()
 
@@ -422,22 +451,32 @@ class GridView(QtWidgets.QWidget):
                 self._zero_lines_r[i].setPos(offset)
                 self._zero_lines_r[i].setVisible(vis)
 
-            # 更新标签 — 动态 X 边距（窗口宽度的 1%），告别贴边窒息感
+            # ── 更新标签：左下角定位，避免与中心波形重叠 ──
             lbl_text = format_channel_label(abs_ch) if active else ""
             x_margin = sd.window_sec * 0.01
+            # y_bottom = 通道底部 + 5% 微留白，防止文字压线
+            y_bottom = offset - ch_h / 2.0 + (ch_h * 0.05)
             if i < len(self._labels_l):
                 self._labels_l[i].setText(lbl_text)
-                self._labels_l[i].setPos(x_margin, offset)
+                self._labels_l[i].setPos(x_margin, y_bottom)
+                self._labels_l[i].setVisible(vis)
+            if i < len(self._labels_r):
+                self._labels_r[i].setText(lbl_text)
+                self._labels_r[i].setPos(x_margin, y_bottom)
+                self._labels_r[i].setVisible(vis)
 
-            # 更新斑马纹（仅偶数行）— 使用真实通道高度 ch_h 完美包裹
+            # ── 更新斑马纹（仅偶数行）：左右两侧同步包裹 ──
             zi = i // 2
             if i % 2 == 0 and zi < len(self._zebra_rects):
                 if active:
-                    rgn = self._zebra_rects[zi]
-                    rgn.setRegion([offset - ch_h / 2.0, offset + ch_h / 2.0])
-                    rgn.setVisible(True)
+                    bounds = [offset - ch_h / 2.0, offset + ch_h / 2.0]
+                    self._zebra_rects[zi].setRegion(bounds)
+                    self._zebra_rects[zi].setVisible(True)
+                    self._zebra_rects_r[zi].setRegion(bounds)
+                    self._zebra_rects_r[zi].setVisible(True)
                 else:
                     self._zebra_rects[zi].setVisible(False)
+                    self._zebra_rects_r[zi].setVisible(False)
 
     def _fill_tile_data(self, sd: SignalData, ptr: int):
         """Tile 模式核心渲染: 更新所有可见栅格的数据。"""
@@ -671,9 +710,9 @@ def _update_tile_label(pi: pg.PlotItem, ch: int):
             break
 
 
-def _add_tile_zero_line(pi: pg.PlotItem, y_lo: float, y_hi: float):
-    """在 Tile 的 PlotItem 中添加 Y=0 的虚线参考线。"""
-    line = pg.InfiniteLine(pos=0, angle=0,
-                            pen=pg.mkPen(color=COLOR_GRID, width=0.5,
-                                         style=QtCore.Qt.DashLine))
+def _add_tile_zero_line(pi: pg.PlotItem):
+    """在 Tile 的 PlotItem 中添加 Y=0 的虚线参考线，与 Compare 模式统一。"""
+    dash_pen = pg.mkPen(color=COLOR_GRID, width=0.5,
+                        style=QtCore.Qt.DashLine)
+    line = pg.InfiniteLine(pos=0, angle=0, pen=dash_pen)
     pi.addItem(line)

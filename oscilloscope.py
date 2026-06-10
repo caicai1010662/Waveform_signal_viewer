@@ -16,9 +16,9 @@ import numpy as np
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtWidgets, QtGui
 
-from config import (COLOR_BG, COLOR_ORIG, COLOR_RECON, COLOR_GRID,
+from config import (COLOR_BG, COLOR_CARD, COLOR_ORIG, COLOR_RECON, COLOR_GRID,
                      COLOR_TEXT, COLOR_SEP, WINDOW_SEC, LINE_WIDTH,
-                     SPACING_FACTOR, DECIMATION_TARGET)
+                     SPACING_FACTOR, DECIMATION_TARGET, FONT_SIZE)
 from data import SignalData
 from utils import make_font, format_channel_label
 
@@ -121,10 +121,12 @@ class OscilloscopeView(QtWidgets.QWidget):
         self._y_offsets = sd.y_offsets_all()
         self._total_height = float(sd.total_y_height)
 
-        font = make_font(8)
+        font = make_font(FONT_SIZE)
+        dash_pen = pg.mkPen(color=COLOR_GRID, width=0.5,
+                            style=QtCore.Qt.DashLine)
         w = sd.window_sec
 
-        # 为每个可见通道创建一对曲线 + 标签
+        # 为每个可见通道创建一对曲线 + 零线 + 标签
         for ch in range(self._visible_channels):
             abs_ch = self._ch_start + ch
             if abs_ch >= sd.n_chan:
@@ -145,21 +147,33 @@ class OscilloscopeView(QtWidgets.QWidget):
             c_recon.setSkipFiniteCheck(True)
             self._curves_recon[abs_ch] = c_recon
 
-            # 通道标签
+            # 零基线（虚线）— 左右同步
+            zl = pg.InfiniteLine(pos=offset, angle=0, pen=dash_pen)
+            zr = pg.InfiniteLine(pos=offset, angle=0, pen=dash_pen)
+            self._left_pi.addItem(zl)
+            self._right_pi.addItem(zr)
+
+            # 通道标签 — 左下角锚点 + 底色 + 置顶，与 Compare 统一
             lbl = pg.TextItem(format_channel_label(abs_ch),
-                              color=COLOR_TEXT, anchor=(0, 0.5))
+                              color=COLOR_TEXT, anchor=(0, 1),
+                              fill=pg.mkBrush(COLOR_CARD))
             lbl.setFont(font)
+            lbl.setZValue(100)
             self._left_pi.addItem(lbl)
-            lbl.setPos(0.0005, offset)
+            # 左下角位置：计算当前通道底部坐标
+            ch_h = float(sd.ch_amp[abs_ch]) * SPACING_FACTOR * sd.amp_scale
+            x_margin = w * 0.01
+            y_bottom = offset - ch_h / 2.0 + (ch_h * 0.05)
+            lbl.setPos(x_margin, y_bottom)
             self._labels[abs_ch] = lbl
 
         # 设置 X/Y 范围
-        self._left_vb.setXRange(0, w, padding=0)
-        self._right_vb.setXRange(0, w, padding=0)
+        pad_x = w * 0.02
+        self._left_vb.setXRange(-pad_x, w + pad_x, padding=0)
+        self._right_vb.setXRange(-pad_x, w + pad_x, padding=0)
 
         n_show = min(self._visible_channels, sd.n_chan - self._ch_start)
         row_h = self._total_height / max(1, sd.n_chan)
-        # Y 范围: 从最后一个可见通道的底部到第一个的顶部
         bot = self._y_offsets[self._ch_start + n_show - 1] - row_h
         top = self._y_offsets[self._ch_start] + row_h
         self._left_vb.setYRange(bot, top, padding=0)

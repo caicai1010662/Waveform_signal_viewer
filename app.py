@@ -198,7 +198,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # ══ 波形显示区 ════════════════════════════════════
         wave_row = QtWidgets.QHBoxLayout()
-        wave_row.setContentsMargins(0, 4, 0, 0)
+        wave_row.setContentsMargins(0, 4, 8, 4)  # 右侧留 8px 防止滚动条贴墙
         wave_row.setSpacing(4)
 
         # GridView — 管理 Compare (Row) 和 Browse (Tile) 两种模式
