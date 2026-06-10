@@ -10,7 +10,7 @@ main.py — SignalViewer 程序入口
     main.py → QApplication → STYLESHEET → MainWindow → show → 进入事件循环
 
   依赖链:
-    config → data → player → grid/oscilloscope/detail → app → main
+    config → data → player → grid/detail → app → main
 """
 
 import sys

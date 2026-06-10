@@ -3,7 +3,7 @@ player.py — 播放引擎
 
   Player  : 精确 QTimer 驱动播放，60fps 同步信号，帧丢弃保护。
             支持循环模式（Loop / Once），变速播放（0.1× ~ 10.0×）。
-            grid / oscilloscope / detail 三个视图共用同一个 Player 实例。
+            grid / detail 两个视图共用同一个 Player 实例。
 
   信号流:
     QTimer._tick() → frame_ready(ptr) → 各视图更新 → Player.ack()

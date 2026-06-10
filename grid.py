@@ -71,8 +71,6 @@ class GridView(QtWidgets.QWidget):
         self._curves_recon: list[pg.PlotDataItem] = []  # 右侧重建信号曲线
         self._labels_l: list[pg.TextItem] = []           # 左侧通道标签
         self._labels_r: list[pg.TextItem] = []           # 右侧通道标签
-        self._zero_lines_l: list[pg.InfiniteLine] = []   # 左侧零基线
-        self._zero_lines_r: list[pg.InfiniteLine] = []   # 右侧零基线
         self._zebra_rects: list[pg.LinearRegionItem] = []   # 左侧斑马纹
         self._zebra_rects_r: list[pg.LinearRegionItem] = [] # 右侧斑马纹
 
@@ -80,7 +78,7 @@ class GridView(QtWidgets.QWidget):
         self._t_buf = np.empty(0, dtype=np.float32)
 
         # ── Tile 模式专用 ─────────────────────────────────
-        self._tiles_orig: dict[tuple, tuple] = {}  # (row,col) → (PlotItem, curve)
+        self._tiles_orig: dict[tuple, tuple] = {}   # (row,col) → (PlotItem, curve, label)
         self._tiles_recon: dict[tuple, tuple] = {}
 
         self._build_ui()
@@ -260,16 +258,6 @@ class GridView(QtWidgets.QWidget):
             abs_ch = i
             offset = float(self._y_offsets[abs_ch])
 
-            # 零基线（虚线）
-            dash_pen = pg.mkPen(color=COLOR_GRID, width=0.5,
-                                style=QtCore.Qt.DashLine)
-            zl = pg.InfiniteLine(pos=offset, angle=0, pen=dash_pen)
-            zr = pg.InfiniteLine(pos=offset, angle=0, pen=dash_pen)
-            self._left_pi.addItem(zl)
-            self._right_pi.addItem(zr)
-            self._zero_lines_l.append(zl)
-            self._zero_lines_r.append(zr)
-
             # 信号曲线
             c_l = self._left_pi.plot(pen=make_pen(COLOR_ORIG, LINE_WIDTH))
             c_l.setDownsampling(auto=False)    # 手动控制降采样
@@ -332,32 +320,30 @@ class GridView(QtWidgets.QWidget):
 
                 # 左侧 tile
                 pi_l = self._tile_left.addPlot(row=r, col=c)
-                self._config_tile_plot(pi_l, abs_ch, font, y_lo, y_hi)
-                _add_tile_zero_line(pi_l)
+                lbl_l = self._config_tile_plot(pi_l, abs_ch, font, y_lo, y_hi)
                 c_l = pi_l.plot(pen=make_pen(COLOR_ORIG, LINE_WIDTH))
                 c_l.setDownsampling(auto=False)
                 c_l.setSkipFiniteCheck(True)
-                self._tiles_orig[(r, c)] = (pi_l, c_l)
+                self._tiles_orig[(r, c)] = (pi_l, c_l, lbl_l)
 
                 # 右侧 tile
                 pi_r = self._tile_right.addPlot(row=r, col=c)
-                self._config_tile_plot(pi_r, abs_ch, font, y_lo, y_hi)
-                _add_tile_zero_line(pi_r)
+                lbl_r = self._config_tile_plot(pi_r, abs_ch, font, y_lo, y_hi)
                 c_r = pi_r.plot(pen=make_pen(COLOR_RECON, LINE_WIDTH))
                 c_r.setDownsampling(auto=False)
                 c_r.setSkipFiniteCheck(True)
-                self._tiles_recon[(r, c)] = (pi_r, c_r)
+                self._tiles_recon[(r, c)] = (pi_r, c_r, lbl_r)
 
         self._fill_tile_data(sd, 0)
 
-        for pi, _ in list(self._tiles_orig.values()):
+        for pi, _, _ in list(self._tiles_orig.values()):
             pi.setXRange(0, w, padding=0)
-        for pi, _ in list(self._tiles_recon.values()):
+        for pi, _, _ in list(self._tiles_recon.values()):
             pi.setXRange(0, w, padding=0)
 
     def _config_tile_plot(self, pi: pg.PlotItem, ch: int,
                           font: QtGui.QFont, y_lo: float, y_hi: float):
-        """配置单个 Tile 的 PlotItem。"""
+        """配置单个 Tile 的 PlotItem。返回 label 引用供后续换绑。"""
         pi.getViewBox().setBackgroundColor(COLOR_CARD)  # 每个格子刷卡片色
         pi.hideButtons()
         pi.setMouseEnabled(x=False, y=False)
@@ -374,6 +360,7 @@ class GridView(QtWidgets.QWidget):
         pi.addItem(label)
         # 左下角定位：贴底边 + 2% 留白
         label.setPos(0, y_lo + (y_hi - y_lo) * 0.02)
+        return label
 
     def clear(self):
         """清空所有曲线、标签、零线、斑马纹、tile。
@@ -388,8 +375,6 @@ class GridView(QtWidgets.QWidget):
         self._curves_recon.clear()
         self._labels_l.clear()
         self._labels_r.clear()
-        self._zero_lines_l.clear()
-        self._zero_lines_r.clear()
         self._zebra_rects.clear()
         self._zebra_rects_r.clear()
         self._tiles_orig.clear()
@@ -443,14 +428,6 @@ class GridView(QtWidgets.QWidget):
             self._curves_orig[i].setVisible(vis)
             self._curves_recon[i].setVisible(vis)
 
-            # 更新零线位置
-            if i < len(self._zero_lines_l):
-                self._zero_lines_l[i].setPos(offset)
-                self._zero_lines_l[i].setVisible(vis)
-            if i < len(self._zero_lines_r):
-                self._zero_lines_r[i].setPos(offset)
-                self._zero_lines_r[i].setVisible(vis)
-
             # ── 更新标签：左下角定位，避免与中心波形重叠 ──
             lbl_text = format_channel_label(abs_ch) if active else ""
             x_margin = sd.window_sec * 0.01
@@ -491,19 +468,37 @@ class GridView(QtWidgets.QWidget):
         t, wp = _step_decimate(t, wp)
 
         # 更新左侧栅格
-        for (r, c), (pi, curve) in list(self._tiles_orig.items()):
+        for (r, c), (pi, curve, label) in list(self._tiles_orig.items()):
             abs_ch = self._ch_offset + r * TILE_COLS + c
-            if abs_ch >= sd.n_chan:
-                continue
-            curve.setData(t, sd.orig[abs_ch, t_slice][:wp])
-            _update_tile_label(pi, abs_ch)
+            if abs_ch < sd.n_chan:
+                curve.setData(t, sd.orig[abs_ch, t_slice][:wp])
+                curve.setVisible(True)
+                label.setText(format_channel_label(abs_ch))
+                label.setVisible(True)
+                # 标签位置跟随新通道的 Y 范围变化，防止错位/重叠
+                ch_amp = float(sd.ch_amp[abs_ch]) * sd.amp_scale
+                y_lo = -ch_amp * 1.2
+                y_hi = ch_amp * 1.2
+                label.setPos(0, y_lo + (y_hi - y_lo) * 0.02)
+            else:
+                curve.setVisible(False)
+                label.setVisible(False)
 
         # 更新右侧栅格
-        for (r, c), (pi, curve) in list(self._tiles_recon.items()):
+        for (r, c), (pi, curve, label) in list(self._tiles_recon.items()):
             abs_ch = self._ch_offset + r * TILE_COLS + c
-            if abs_ch >= sd.n_chan:
-                continue
-            curve.setData(t, sd.recon[abs_ch, t_slice][:wp])
+            if abs_ch < sd.n_chan:
+                curve.setData(t, sd.recon[abs_ch, t_slice][:wp])
+                curve.setVisible(True)
+                label.setText(format_channel_label(abs_ch))
+                label.setVisible(True)
+                ch_amp = float(sd.ch_amp[abs_ch]) * sd.amp_scale
+                y_lo = -ch_amp * 1.2
+                y_hi = ch_amp * 1.2
+                label.setPos(0, y_lo + (y_hi - y_lo) * 0.02)
+            else:
+                curve.setVisible(False)
+                label.setVisible(False)
 
     # ═══════════════════════════════════════════════════════════
     # 视口同步 — 左右 ViewBox Y 轴联动
@@ -564,9 +559,9 @@ class GridView(QtWidgets.QWidget):
             self._right_vb.setXRange(-pad_x, w + pad_x, padding=0)
             self._fill_row_data(sd, self._last_ptr if self._last_ptr >= 0 else 0)
         else:
-            for pi, _ in list(self._tiles_orig.values()):
+            for pi, _, _ in list(self._tiles_orig.values()):
                 pi.setXRange(0, w, padding=0)
-            for pi, _ in list(self._tiles_recon.values()):
+            for pi, _, _ in list(self._tiles_recon.values()):
                 pi.setXRange(0, w, padding=0)
             self._fill_tile_data(sd, self._last_ptr if self._last_ptr >= 0 else 0)
 
@@ -589,12 +584,12 @@ class GridView(QtWidgets.QWidget):
 
         播放期间（_fill_tile_data）不再调用 setYRange，减少 ViewBox 重计算开销。
         """
-        for (r, c), (pi, _) in list(self._tiles_orig.items()):
+        for (r, c), (pi, _, _) in list(self._tiles_orig.items()):
             abs_ch = self._ch_offset + r * TILE_COLS + c
             if abs_ch < sd.n_chan:
                 ch_amp = float(sd.ch_amp[abs_ch]) * sd.amp_scale
                 pi.setYRange(-ch_amp * 1.2, ch_amp * 1.2, padding=0)
-        for (r, c), (pi, _) in list(self._tiles_recon.items()):
+        for (r, c), (pi, _, _) in list(self._tiles_recon.items()):
             abs_ch = self._ch_offset + r * TILE_COLS + c
             if abs_ch < sd.n_chan:
                 ch_amp = float(sd.ch_amp[abs_ch]) * sd.amp_scale
@@ -668,7 +663,7 @@ class GridView(QtWidgets.QWidget):
 
                 # 将 viewport 坐标转为 scene 坐标
                 scene_pt = glw.mapToScene(event.pos())
-                for (r, c), (pi, _) in tiles.items():
+                for (r, c), (pi, _, _) in tiles.items():
                     vb = pi.getViewBox()
                     if vb.sceneBoundingRect().contains(scene_pt):
                         abs_ch = self._ch_offset + r * TILE_COLS + c
@@ -700,19 +695,3 @@ def _step_decimate(t: np.ndarray, wp: int) -> tuple[np.ndarray, int]:
         step = wp // MAX_POINTS_PER_CURVE + 1
         return t[::step], len(t[::step])
     return t, wp
-
-
-def _update_tile_label(pi: pg.PlotItem, ch: int):
-    """更新 Tile 的通道标签文本（用于滚动时换绑通道）。"""
-    for item in pi.items:
-        if isinstance(item, pg.TextItem):
-            item.setText(format_channel_label(ch))
-            break
-
-
-def _add_tile_zero_line(pi: pg.PlotItem):
-    """在 Tile 的 PlotItem 中添加 Y=0 的虚线参考线，与 Compare 模式统一。"""
-    dash_pen = pg.mkPen(color=COLOR_GRID, width=0.5,
-                        style=QtCore.Qt.DashLine)
-    line = pg.InfiniteLine(pos=0, angle=0, pen=dash_pen)
-    pi.addItem(line)

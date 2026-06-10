@@ -1,8 +1,8 @@
 """
 app.py — 主窗口（顶层组装器）
 
-  MainWindow : 将 grid / oscilloscope / player / data 组装成完整 UI。
-               负责: 顶栏控件、4 个滑动条、键盘快捷键、文件加载、详情窗管理。
+  MainWindow : 将 grid / player / data 组装成完整 UI。
+               负责: 顶栏控件、3 个滑动条、键盘快捷键、文件加载、详情窗管理。
 
   这是用户直接交互的窗口。所有控件信号在这里连接到对应的处理逻辑。
 
@@ -27,7 +27,6 @@ from data import SignalData, LoaderWorker
 from player import Player
 from grid import GridView
 from detail import DetailWindow
-from oscilloscope import OscilloscopeView
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -35,13 +34,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
     布局:
       ┌─────────────────────────────────────────────┐
-      │ [Load] [Load] | [Compare][Browse][Roll] |   │
+      │ [Load] [Load] | [Compare][Browse] |         │
       │ [Start] [Loop]    Time: [50ms] ─━─          │ ← 顶栏
       │                   Amp: [1.0×] ─━─           │
       │                   Speed:[1.0×] ─━─           │
       ├─────────────────────────────────────────────┤
       │ ┌─────────────┐ │ ┌─────────────┐ ┌──────┐ │
-      │ │  原始信号    │ │ │  重建信号    │ │ 通道 │ │ ← 波形区
+      │ │  Rawdata     │ │ │  Recdata     │ │ 通道 │ │ ← 波形区
       │ │  (左侧)     │ │ │  (右侧)     │ │ 滑块 │ │
       │ └─────────────┘ │ └─────────────┘ └──────┘ │
       └─────────────────────────────────────────────┘
@@ -63,7 +62,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # ── 状态 ─────────────────────────────────────────
         self._details: weakref.WeakSet = weakref.WeakSet()  # 详情窗弱引用集
         self._loader: LoaderWorker = None                   # 当前异步加载线程
-        self._mode = "row"  # 当前显示模式: "row" | "tile" | "scope"
+        self._mode = "row"  # 当前显示模式: "row" | "tile"
 
         self._build()
         self._bind_keys()
@@ -106,20 +105,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self._btn_tile = QtWidgets.QPushButton("Browse")
         self._btn_tile.setCheckable(True)
 
-        self._btn_scope = QtWidgets.QPushButton("Roll")
-        self._btn_scope.setCheckable(True)
-
-        # QButtonGroup 保证三者互斥（同一时间只有一个 checked）
+        # QButtonGroup 保证两者互斥
         mode_group = QtWidgets.QButtonGroup(self)
         mode_group.setExclusive(True)
         mode_group.addButton(self._btn_row, 0)
         mode_group.addButton(self._btn_tile, 1)
-        mode_group.addButton(self._btn_scope, 2)
         mode_group.buttonClicked.connect(self._on_mode_change)
 
         bar.addWidget(self._btn_row)
         bar.addWidget(self._btn_tile)
-        bar.addWidget(self._btn_scope)
         bar.addWidget(self._make_vsep())
 
         # ── 播放控制按钮 ──────────────────────────────────
@@ -205,17 +199,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._grid = GridView(self._sd)
         self._grid.channel_clicked.connect(self._open_detail)
 
-        # OscilloscopeView — Roll 模式
-        self._scope = OscilloscopeView(self._sd)
-        self._scope.channel_clicked.connect(self._open_detail)
-
-        # QStackedLayout 叠加两个视图，按模式切换
-        self._view_stack = QtWidgets.QStackedLayout()
-        self._view_stack.addWidget(self._grid)    # 索引 0
-        self._view_stack.addWidget(self._scope)   # 索引 1
-        self._view_stack.setCurrentIndex(0)
-
-        wave_row.addLayout(self._view_stack, 1)
+        wave_row.addWidget(self._grid, 1)
 
         # 右侧通道浏览滑动条
         # 改粗细: setFixedWidth(18 → 更大/更小)
@@ -316,25 +300,16 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_mode_change(self, btn):
         """模式按钮点击回调。QButtonGroup 保证互斥。"""
         mode_map = {self._btn_row: "row",
-                     self._btn_tile: "tile",
-                     self._btn_scope: "scope"}
+                     self._btn_tile: "tile"}
         new_mode = mode_map.get(btn, "row")
         if new_mode == self._mode:
             return
         self._mode = new_mode
-
-        if new_mode == "scope":
-            self._view_stack.setCurrentIndex(1)  # 显示 OscilloscopeView
-            if self._sd.ready:
-                self._scope.set_channel_range(0, 8)
-        else:
-            self._view_stack.setCurrentIndex(0)  # 显示 GridView
-            self._grid.set_mode(new_mode)        # "row" 或 "tile"
-            if self._sd.ready:
-                self._grid.build()
-                self._slider_ch.setMaximum(
-                    max(0, self._sd.max_channel_offset))
-
+        self._grid.set_mode(new_mode)
+        if self._sd.ready:
+            self._grid.build()
+            self._slider_ch.setMaximum(
+                max(0, self._sd.max_channel_offset))
         self._update_status()
 
     def _load_orig(self):
@@ -396,11 +371,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._sd.compute_params()
 
                 # ── 构建视图 ────────────────────────────────
-                if self._mode == "scope":
-                    self._scope.set_channel_range(0, 8)
-                else:
-                    self._grid.set_mode(self._mode)
-                    self._grid.build()
+                self._grid.set_mode(self._mode)
+                self._grid.build()
 
                 # ── 配置播放器 ──────────────────────────────
                 self._player.configure(
@@ -457,11 +429,11 @@ class MainWindow(QtWidgets.QMainWindow):
     # ═══════════════════════════════════════════════════════════
 
     def _on_frame(self):
-        """播放器每帧回调。将当前 ptr 分发给当前显示的视图。
+        """播放器每帧回调。将当前 ptr 分发给 GridView。
 
         流程:
           1. Player._tick() → frame_ready(ptr)
-          2. _on_frame → grid.scroll(ptr) 或 scope.scroll(ptr)
+          2. _on_frame → grid.scroll(ptr)
           3. Player.ack() → 释放 _pending 锁
 
         finally 块保证 ack() 一定执行：即使视图渲染抛异常，
@@ -473,10 +445,7 @@ class MainWindow(QtWidgets.QMainWindow):
             ptr = self._player.ptr
             if ptr + self._sd.window_pts > self._sd.n_samples:
                 return
-            if self._mode == "scope":
-                self._scope.scroll(ptr, self._sd)
-            else:
-                self._grid.scroll(ptr, self._sd)
+            self._grid.scroll(ptr, self._sd)
         finally:
             self._player.ack()
 
@@ -498,8 +467,7 @@ class MainWindow(QtWidgets.QMainWindow):
         """通道滑动条回调。仅在 Row/Tile 模式生效。"""
         if not self._sd.ready:
             return
-        if self._mode != "scope":
-            self._grid.set_offset(self._sd, val)
+        self._grid.set_offset(self._sd, val)
 
     def _on_win_slider(self, val: int):
         """时窗滑动条: 0-1000 → WINDOW_SEC_MIN ~ WINDOW_SEC_MAX 秒。
@@ -513,8 +481,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._sd.set_window(sec)
         self._lbl_win.setText(f"{sec * 1000:.0f}ms")
 
-        if self._mode != "scope":
-            self._grid.update_ranges(self._sd)
+        self._grid.update_ranges(self._sd)
         self._player.configure(
             self._sd.s_freq, self._sd.n_samples, self._sd.window_pts)
         self._player.seek(self._player.ptr)
@@ -532,8 +499,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._sd.set_amp_scale(scale)
         self._lbl_amp.setText(f"{scale:.1f}×")
 
-        if self._mode != "scope":
-            self._grid.reload_amp(self._sd)
+        self._grid.reload_amp(self._sd)
         self._update_details()
 
     def _on_speed_slider(self, val: int):

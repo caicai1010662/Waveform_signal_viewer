@@ -138,7 +138,7 @@ QWidget {{
     font-weight: bold;
 }}
 
-/* ── 普通按钮 (Load / Start / Loop / Compare / Browse / Roll) ── */
+/* ── 普通按钮 (Load / Start / Loop / Compare / Browse) ── */
 QPushButton {{
     background-color: #3C3C3C;   /* 按钮底色 */
     color: #E0E0E0;              /* 按钮文字色 */
