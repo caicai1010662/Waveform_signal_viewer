@@ -2,7 +2,7 @@
 config.py — 全局参数、配色、样式表
 
   SignalViewer 所有可调参数集中于此。
-  极简工业风 (Minimalist Industrial Style)。
+  VS Code Dark Theme。
 """
 
 import pyqtgraph as pg
@@ -11,7 +11,7 @@ import pyqtgraph as pg
 WINDOW_SEC = 0.05
 TARGET_FPS = 60
 PLAYBACK_SPEED = 0.005
-LINE_WIDTH = 0.6
+LINE_WIDTH = 1.2  # VS Code 深色背景下，高亮色需要更粗的线条支撑
 
 # ── 网格布局 ──────────────────────────────────────────────
 TILE_COLS = 6                 # Tile 模式每行栅格数
@@ -27,96 +27,89 @@ CACHE_DECIMATED = True        # 是否缓存降采样结果
 WINDOW_SEC_MIN = 0.05
 WINDOW_SEC_MAX = 0.10
 AMP_SCALE_MIN  = 1.0
-AMP_SCALE_MAX  = 1.5
+AMP_SCALE_MAX  = 10.0
 SPEED_MUL_MIN  = 0.5
 SPEED_MUL_MAX  = 1.5
 
 # ── 数据驱动参数 ──────────────────────────────────────────
 Y_PERCENTILE   = 99.5         # 过滤极端毛刺，让主体波形更饱满
-SPACING_FACTOR = 1.5           # 缩小通道留白，波形填满屏幕
+SPACING_FACTOR = 1.5          # 缩小通道留白，波形填满屏幕
 
-# ── 配色 — 极简工业风 ─────────────────────────────────────
-# COLOR_BG       = "#2C2C2C"   # 画布底色 — 极致深黑
-# COLOR_ORIG     = "#FFFFFF"   # 原始信号 — 纯白
-# COLOR_RECON    = "#FFD600"   # 重建信号 — 亮黄
-# COLOR_GRID     = "#FF0000"   # 辅助线/刻度 — 极暗灰
-# COLOR_ACCENT   = "#FF4500"   # 交互/Hover/选中 — 橙红
-# COLOR_TEXT     = "#A0A0A0"   # 文字 — 中性灰
-# COLOR_CARD     = "#0F0F12"   # 卡片/面板底色
-# COLOR_SEP      = "#1F1F24"   # 分隔线
-# COLOR_SLIDER   = "#2A2A30"   # 滑动条底色
-# COLOR_HOVER    = "#353540"   # 按钮悬停
-
-# SignalViewer 配色方案 (高对比度 / 清晰区分)
-
-COLOR_BG         = "#0A0A0A"  # 画布底色：极致深黑，减少眩光
-COLOR_CARD       = "#1A1A1E"  # 波形面板：深灰蓝，与背景形成层级
-COLOR_ORIG       = "#00FF9F"  # 原始信号：薄荷绿（高亮且护眼）
-COLOR_RECON      = "#FFD600"  # 重建信号：亮黄（与绿色形成视觉冷暖差）
-COLOR_GRID       = "#2D2D35"  # 辅助线/刻度：深灰色（隐形辅助，不干扰数据）
-COLOR_ACCENT     = "#FF4500"  # 交互/选中/高亮：橙红（极强的视觉抓取点）
-COLOR_TEXT       = "#B0B0B0"  # 文字/标签：中性浅灰（保证可读性）
-COLOR_SEP        = "#3D3D48"  # 分隔线：明度适中（划分空间）
-COLOR_SLIDER     = "#25252C"  # 滑动条底色：略重于面板色
-COLOR_HOVER      = "#4A4A58"  # 悬停反馈：较亮的冷灰，产生浮起感
-COLOR_ZEBRA      = "#0E0E14"  # 斑马纹交替行（比画布稍亮）
+# ── 配色 — VS Code Dark Theme ─────────────────────────────
+COLOR_BG         = "#181818"  # 画布底色：VS Code 外层背景 (如侧边栏/底栏)
+COLOR_CARD       = "#1E1E1E"  # 波形面板：VS Code 核心编辑器底色
+COLOR_ORIG       = "#4FC1FF"  # 原始信号：VS Code 变量浅蓝 (极佳的护眼高亮)
+COLOR_RECON      = "#DCDCAA"  # 重建信号：VS Code 函数淡黄 (温和且具有对比度)
+COLOR_GRID       = "#333333"  # 辅助线/刻度：VS Code 编辑器参考线颜色
+COLOR_ACCENT     = "#007ACC"  # 交互/选中：VS Code 标志性主题蓝
+COLOR_TEXT       = "#CCCCCC"  # 文字/标签：提高亮度，更清晰
+COLOR_SEP        = "#2B2B2B"  # 分隔线：极其细微的面板分割
+COLOR_SLIDER     = "#464646"  # 滑动条底色：提亮轨道，与背景拉开层次
+COLOR_HOVER      = "#2A2D2E"  # 悬停反馈：VS Code 列表悬停色
+COLOR_ZEBRA      = "#222222"  # 斑马纹交替行：比面板色稍微深/亮一点点
 
 # ── 字体 ──────────────────────────────────────────────────
-FONT_FAMILY = "Microsoft YaHei Mono"  # 等宽字体，适合信号显示
-FONT_SIZE   = 20
-FONT_SIZE_SMALL = 15
+FONT_FAMILY = "Consolas"
+FONT_SIZE   = 16
+FONT_SIZE_SMALL = 13
 
-# ── 样式表 ────────────────────────────────────────────────
+# ── 样式表 (VS Code 扁平化风格) ───────────────────────────
 STYLESHEET = f"""
 QWidget {{
     background-color: {COLOR_BG}; color: {COLOR_TEXT};
-    font-family: "{FONT_FAMILY}"; font-size: {FONT_SIZE}px; font-weight: 400;
+    font-family: "{FONT_FAMILY}", "Microsoft YaHei Mono";
+    font-size: {FONT_SIZE}px; font-weight: 400;
 }}
 
-/* ── 按钮 ─────────────────────────────────────────── */
+/* ── 按钮 ───────────────────────── */
 QPushButton {{
-    background: {COLOR_CARD}; color: {COLOR_TEXT};
-    border: 1px solid {COLOR_SEP}; border-radius: 6px;
-    padding: 6px 16px; font-family: "{FONT_FAMILY}";
-    font-size: {FONT_SIZE}px;
+    background-color: #3C3C3C;
+    color: #E0E0E0;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    padding: 10px 20px;
+    font-size: 20px;
+    font-weight: bold;
 }}
 QPushButton:hover {{
-    border-color: {COLOR_HOVER}; background: #1A1A20;
-    color: {COLOR_ORIG};
+    background-color: #464646;  /* 悬停微亮 */
+    color: #FFFFFF;
 }}
 QPushButton:pressed {{
-    background: {COLOR_BG}; border-color: {COLOR_ACCENT};
+    background-color: #2D2D2D;
 }}
 QPushButton:disabled {{
-    color: #3A3A40; border-color: #1A1A20; background: #0D0D10;
+    background-color: #252526;  /* 略高于纯黑背景，确保按钮存在物理轮廓 */
+    color: #808080;             /* VS Code 标准禁用灰 */
+    border: 1px solid #3E3E42;  /* 微弱的边框，拒绝消失在虚空中 */
 }}
+/* 独立 Toggle 按钮 (如 Loop) 的激活状态 — VS Code 主题蓝 */
 QPushButton:checked {{
-    border: 2px solid {COLOR_ORIG};
-    color: {COLOR_BG};
-    background: {COLOR_ORIG};
-    font-weight: bold;
+    background-color: {COLOR_ACCENT};
+    color: #FFFFFF;
+    border: 1px solid {COLOR_ACCENT};
 }}
 
 /* ── 滑动条 ───────────────────────────────────────── */
 QSlider::groove:horizontal {{
-    background: {COLOR_SLIDER}; height: 4px; border-radius: 2px;
+    background: {COLOR_SLIDER}; height: 6px; border-radius: 3px;
 }}
 QSlider::handle:horizontal {{
-    background: {COLOR_ACCENT}; width: 12px; height: 12px;
-    margin: -4px 0; border-radius: 6px;
+    background: {COLOR_ACCENT}; width: 14px; height: 14px;
+    margin: -4px 0; border-radius: 7px;
 }}
 QSlider::handle:horizontal:hover {{
-    background: #FF6A30;
+    background: #1194EB; /* 主题蓝提亮 */
 }}
 QSlider::groove:vertical {{
     background: {COLOR_SLIDER}; width: 4px; border-radius: 2px;
 }}
 QSlider::handle:vertical {{
-    background: {COLOR_ACCENT}; height: 12px; width: 12px;
-    margin: 0 -4px; border-radius: 6px;
+    background: {COLOR_ACCENT}; height: 14px; width: 14px;
+    margin: 0 -4px; border-radius: 7px;
 }}
 QSlider::handle:vertical:hover {{
-    background: #FF6A30;
+    background: #1194EB;
 }}
 
 /* ── 滚动条 ───────────────────────────────────────── */
@@ -132,33 +125,17 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
 }}
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
 
-/* ── 标签 ─────────────────────────────────────────── */
+/* ── 其他面板保持纯粹扁平 ───────────────────────────── */
 QLabel {{
-    color: {COLOR_TEXT}; background-color: transparent;
-    font-family: "{FONT_FAMILY}"; font-size: {FONT_SIZE}px;
+    background-color: transparent;
 }}
-
-/* ── 进度对话框 ────────────────────────────────────── */
-QProgressDialog {{
-    background: {COLOR_CARD}; border: 1px solid {COLOR_SEP};
-    border-radius: 8px;
-}}
-QProgressDialog QLabel {{
-    color: {COLOR_TEXT}; font-family: "{FONT_FAMILY}";
-    font-size: {FONT_SIZE}px;
-}}
-
-/* ── 消息框 ───────────────────────────────────────── */
-QMessageBox {{
-    background: {COLOR_CARD}; border: 1px solid {COLOR_SEP};
-}}
-QMessageBox QLabel {{
-    color: {COLOR_TEXT}; font-family: "{FONT_FAMILY}";
-    font-size: {FONT_SIZE}px;
+QProgressDialog, QMessageBox {{
+    background: {COLOR_CARD};
+    border: 1px solid {COLOR_SEP};
 }}
 """
 
 # ── pyqtgraph 全局配置 ────────────────────────────────────
 pg.setConfigOptions(antialias=False, useOpenGL=False)
-pg.setConfigOption('background', COLOR_CARD)   # 卡片底色，与纯黑背景区分层级
-pg.setConfigOption('foreground', COLOR_TEXT)   # 坐标轴文字使用浅灰
+pg.setConfigOption('background', COLOR_CARD)
+pg.setConfigOption('foreground', COLOR_TEXT)

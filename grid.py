@@ -72,6 +72,7 @@ class GridView(QtWidgets.QWidget):
 
         # ── Row 模式 ─────────────────────────────────────
         self._row_widget = QtWidgets.QWidget()
+        self._row_widget.setStyleSheet(f"background-color: {COLOR_CARD};")
         row_lay = QtWidgets.QHBoxLayout(self._row_widget)
         row_lay.setContentsMargins(0, 0, 0, 0)
         row_lay.setSpacing(0)
@@ -98,6 +99,7 @@ class GridView(QtWidgets.QWidget):
 
         # ── Tile 模式 ────────────────────────────────────
         self._tile_widget = QtWidgets.QWidget()
+        self._tile_widget.setStyleSheet(f"background-color: {COLOR_CARD};")
         tile_lay = QtWidgets.QHBoxLayout(self._tile_widget)
         tile_lay.setContentsMargins(0, 0, 0, 0)
         tile_lay.setSpacing(0)
@@ -132,8 +134,8 @@ class GridView(QtWidgets.QWidget):
         pi.setMouseEnabled(x=False, y=False)
         pi.setMenuEnabled(False)
         pi.hideAxis('left')
-        pi.showAxis('bottom')
-        pi.setLabel('bottom', 'Time', units='s')
+
+        pi.hideAxis('bottom')
 
     # ═══════════════════════════════════════════════════════════
     # 模式切换

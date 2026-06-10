@@ -49,8 +49,8 @@ SignalViewer/
 | **Load Original** | Select original .mat file |
 | **Load Reconstructed** | Select reconstructed .mat file |
 | **Row / Tile / Scope** | Switch display mode (exclusive) |
-| **▶ Play / ⏸ Pause** | Toggle playback |
-| **🔁 Loop / 🔁 One-Shot** | Toggle loop mode (default: loop) |
+| **Start /Pause** | Toggle playback |
+| **Loop / One-Shot** | Toggle loop mode (default: loop) |
 
 ### Sliders
 

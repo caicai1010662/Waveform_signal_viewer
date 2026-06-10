@@ -10,7 +10,7 @@ import weakref
 from pyqtgraph.Qt import QtCore, QtWidgets, QtGui
 
 from config import (COLOR_BG, COLOR_TEXT, COLOR_ACCENT, COLOR_CARD,
-                     COLOR_SEP, COLOR_HOVER, FONT_FAMILY, FONT_SIZE,
+                     COLOR_SEP, COLOR_HOVER, COLOR_ORIG, FONT_FAMILY, FONT_SIZE,
                      WINDOW_SEC, WINDOW_SEC_MIN, WINDOW_SEC_MAX,
                      AMP_SCALE_MIN, AMP_SCALE_MAX,
                      SPEED_MUL_MIN, SPEED_MUL_MAX)
@@ -57,10 +57,10 @@ class MainWindow(QtWidgets.QMainWindow):
         bar.setSpacing(8)
 
         # 加载按钮
-        self._btn_orig = QtWidgets.QPushButton("Load Original (.mat)")
+        self._btn_orig = QtWidgets.QPushButton("Load Rawdata (.mat)")
         self._btn_orig.clicked.connect(self._load_orig)
 
-        self._btn_recon = QtWidgets.QPushButton("Load Reconstructed (.mat)")
+        self._btn_recon = QtWidgets.QPushButton("Load Recdata (.mat)")
         self._btn_recon.clicked.connect(self._load_recon)
         self._btn_recon.setEnabled(False)
 
@@ -70,38 +70,16 @@ class MainWindow(QtWidgets.QMainWindow):
         # 分隔
         bar.addWidget(self._make_vsep())
 
-        # 模式按钮（分段控件样式）
-        seg_style = (
-            "QPushButton {"
-            "  border-radius: 0px; margin: 0px; padding: 5px 14px;"
-            f" background: {COLOR_CARD}; color: {COLOR_TEXT};"
-            f" border: 1px solid {COLOR_SEP};"
-            "}"
-            "QPushButton:checked {"
-            f" background: {COLOR_ACCENT}; color: #FFFFFF;"
-            f" border-color: {COLOR_ACCENT};"
-            "}"
-            "QPushButton:hover:!checked {"
-            f" border-color: {COLOR_HOVER};"
-            "}"
-        )
-
-        self._btn_row = QtWidgets.QPushButton("Row")
+        # 模式按钮 — 不设任何专属样式，完全继承全局按钮风格
+        self._btn_row = QtWidgets.QPushButton("Compare")
         self._btn_row.setCheckable(True)
         self._btn_row.setChecked(True)
-        self._btn_row.setStyleSheet(seg_style + (
-            "QPushButton { border-top-left-radius: 6px;"
-            "border-bottom-left-radius: 6px; }"))
 
-        self._btn_tile = QtWidgets.QPushButton("Tile")
+        self._btn_tile = QtWidgets.QPushButton("Browse")
         self._btn_tile.setCheckable(True)
-        self._btn_tile.setStyleSheet(seg_style)
 
-        self._btn_scope = QtWidgets.QPushButton("Scope")
+        self._btn_scope = QtWidgets.QPushButton("Roll")
         self._btn_scope.setCheckable(True)
-        self._btn_scope.setStyleSheet(seg_style + (
-            "QPushButton { border-top-right-radius: 6px;"
-            "border-bottom-right-radius: 6px; }"))
 
         mode_group = QtWidgets.QButtonGroup(self)
         mode_group.setExclusive(True)
@@ -117,12 +95,12 @@ class MainWindow(QtWidgets.QMainWindow):
         bar.addWidget(self._make_vsep())
 
         # 播放按钮
-        self._btn_play = QtWidgets.QPushButton("▶  Play")
+        self._btn_play = QtWidgets.QPushButton("Start")
         self._btn_play.clicked.connect(self._player.toggle)
         self._btn_play.setEnabled(False)
         bar.addWidget(self._btn_play)
 
-        self._btn_loop = QtWidgets.QPushButton("🔁 Loop")
+        self._btn_loop = QtWidgets.QPushButton("Loop")
         self._btn_loop.setCheckable(True)
         self._btn_loop.setChecked(True)
         self._btn_loop.clicked.connect(self._player.toggle_loop)
@@ -134,7 +112,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # 时窗：Time: [50ms] ─━─
         lbl_time_title = QtWidgets.QLabel("Time:")
-        lbl_time_title.setStyleSheet(f"color: {COLOR_TEXT};")
+        lbl_time_title.setStyleSheet(f"color: {COLOR_TEXT}; font-size: 14px; font-weight: bold;")
         bar.addWidget(lbl_time_title)
         self._lbl_win = self._make_info_label("50ms")
         bar.addWidget(self._lbl_win)
@@ -144,7 +122,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # 幅值：Amp: [1.0×] ─━─
         lbl_amp_title = QtWidgets.QLabel("Amp:")
-        lbl_amp_title.setStyleSheet(f"color: {COLOR_TEXT};")
+        lbl_amp_title.setStyleSheet(f"color: {COLOR_TEXT}; font-size: 14px; font-weight: bold;")
         bar.addWidget(lbl_amp_title)
         self._lbl_amp = self._make_info_label("1.0×")
         bar.addWidget(self._lbl_amp)
@@ -154,7 +132,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # 速度：Speed: [1.0×] ─━─
         lbl_speed_title = QtWidgets.QLabel("Speed:")
-        lbl_speed_title.setStyleSheet(f"color: {COLOR_TEXT};")
+        lbl_speed_title.setStyleSheet(f"color: {COLOR_TEXT}; font-size: 14px; font-weight: bold;")
         bar.addWidget(lbl_speed_title)
         self._lbl_speed = self._make_info_label("1.0×")
         bar.addWidget(self._lbl_speed)
@@ -205,13 +183,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
         root.addLayout(wave_row, 1)
 
-        # ── 状态栏 ────────────────────────────────────────
-        self._status = QtWidgets.QLabel("Ready")
-        self._status.setStyleSheet(
-            f"color: {COLOR_TEXT}; font-family: '{FONT_FAMILY}'; "
-            f"font-size: {FONT_SIZE}px; padding: 4px 8px;")
-        root.addWidget(self._status)
-
         # 初始化滑动条默认值
         self._reset_sliders()
 
@@ -234,10 +205,10 @@ class MainWindow(QtWidgets.QMainWindow):
     def _make_info_label(self, text: str) -> QtWidgets.QLabel:
         lbl = QtWidgets.QLabel(text)
         lbl.setStyleSheet(
-            f"color: {COLOR_TEXT}; font-family: '{FONT_FAMILY}'; "
-            f"font-size: 10px; padding: 2px 4px; "
-            f"background: {COLOR_CARD}; border-radius: 4px;")
-        lbl.setFixedWidth(40)
+            f"color: #FFFFFF; font-family: '{FONT_FAMILY}'; "
+            f"font-size: 13px; font-weight: bold; padding: 4px 6px; "
+            f"background: #252526; border: 1px solid #3E3E42; border-radius: 4px;")
+        lbl.setFixedWidth(55)
         lbl.setAlignment(QtCore.Qt.AlignCenter)
         return lbl
 
@@ -437,10 +408,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._player.ack()
 
     def _on_state(self, playing: bool):
-        self._btn_play.setText("⏸  Pause" if playing else "▶  Play")
+        self._btn_play.setText("Pause" if playing else "Start")
 
     def _on_loop_changed(self, looping: bool):
-        self._btn_loop.setText("🔁 Loop" if looping else "🔁 One-Shot")
+        self._btn_loop.setText("Loop" if looping else "Once")
         self._btn_loop.setChecked(looping)
 
     # ═══════════════════════════════════════════════════════════
@@ -526,16 +497,4 @@ class MainWindow(QtWidgets.QMainWindow):
     # ═══════════════════════════════════════════════════════════
 
     def _update_status(self):
-        if self._sd.ready:
-            self._status.setText(
-                f"Ch 1-{self._sd.n_chan}  |  "
-                f"{self._sd.s_freq / 1000:.0f} kHz  |  "
-                f"{self._sd.n_samples / self._sd.s_freq:.1f}s  |  "
-                f"Mode: {self._mode.title()}")
-        elif self._sd.orig is not None:
-            self._status.setText(
-                f"Original loaded: Ch 1-{self._sd.n_chan}  |  "
-                f"{self._sd.s_freq / 1000:.0f} kHz  |  "
-                f"Awaiting reconstructed...")
-        else:
-            self._status.setText("Ready — Load original .mat file to begin")
+        pass  # 状态栏已移除
