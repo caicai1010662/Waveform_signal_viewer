@@ -10,7 +10,7 @@ import weakref
 from pyqtgraph.Qt import QtCore, QtWidgets, QtGui
 
 from config import (COLOR_BG, COLOR_TEXT, COLOR_ACCENT, COLOR_CARD,
-                     COLOR_SEP, FONT_FAMILY, FONT_SIZE,
+                     COLOR_SEP, COLOR_HOVER, FONT_FAMILY, FONT_SIZE,
                      WINDOW_SEC, WINDOW_SEC_MIN, WINDOW_SEC_MAX,
                      AMP_SCALE_MIN, AMP_SCALE_MAX,
                      SPEED_MUL_MIN, SPEED_MUL_MAX)
@@ -70,16 +70,38 @@ class MainWindow(QtWidgets.QMainWindow):
         # 分隔
         bar.addWidget(self._make_vsep())
 
-        # 模式按钮
+        # 模式按钮（分段控件样式）
+        seg_style = (
+            "QPushButton {"
+            "  border-radius: 0px; margin: 0px; padding: 5px 14px;"
+            f" background: {COLOR_CARD}; color: {COLOR_TEXT};"
+            f" border: 1px solid {COLOR_SEP};"
+            "}"
+            "QPushButton:checked {"
+            f" background: {COLOR_ACCENT}; color: #FFFFFF;"
+            f" border-color: {COLOR_ACCENT};"
+            "}"
+            "QPushButton:hover:!checked {"
+            f" border-color: {COLOR_HOVER};"
+            "}"
+        )
+
         self._btn_row = QtWidgets.QPushButton("Row")
         self._btn_row.setCheckable(True)
         self._btn_row.setChecked(True)
+        self._btn_row.setStyleSheet(seg_style + (
+            "QPushButton { border-top-left-radius: 6px;"
+            "border-bottom-left-radius: 6px; }"))
 
         self._btn_tile = QtWidgets.QPushButton("Tile")
         self._btn_tile.setCheckable(True)
+        self._btn_tile.setStyleSheet(seg_style)
 
         self._btn_scope = QtWidgets.QPushButton("Scope")
         self._btn_scope.setCheckable(True)
+        self._btn_scope.setStyleSheet(seg_style + (
+            "QPushButton { border-top-right-radius: 6px;"
+            "border-bottom-right-radius: 6px; }"))
 
         mode_group = QtWidgets.QButtonGroup(self)
         mode_group.setExclusive(True)
@@ -110,21 +132,30 @@ class MainWindow(QtWidgets.QMainWindow):
 
         bar.addStretch(1)
 
-        # 时窗滑动条
+        # 时窗：Time: [50ms] ─━─
+        lbl_time_title = QtWidgets.QLabel("Time:")
+        lbl_time_title.setStyleSheet(f"color: {COLOR_TEXT};")
+        bar.addWidget(lbl_time_title)
         self._lbl_win = self._make_info_label("50ms")
         bar.addWidget(self._lbl_win)
         self._slider_win = self._make_h_slider()
         self._slider_win.valueChanged.connect(self._on_win_slider)
         bar.addWidget(self._slider_win)
 
-        # 幅值滑动条
+        # 幅值：Amp: [1.0×] ─━─
+        lbl_amp_title = QtWidgets.QLabel("Amp:")
+        lbl_amp_title.setStyleSheet(f"color: {COLOR_TEXT};")
+        bar.addWidget(lbl_amp_title)
         self._lbl_amp = self._make_info_label("1.0×")
         bar.addWidget(self._lbl_amp)
         self._slider_amp = self._make_h_slider()
         self._slider_amp.valueChanged.connect(self._on_amp_slider)
         bar.addWidget(self._slider_amp)
 
-        # 速度滑动条
+        # 速度：Speed: [1.0×] ─━─
+        lbl_speed_title = QtWidgets.QLabel("Speed:")
+        lbl_speed_title.setStyleSheet(f"color: {COLOR_TEXT};")
+        bar.addWidget(lbl_speed_title)
         self._lbl_speed = self._make_info_label("1.0×")
         bar.addWidget(self._lbl_speed)
         self._slider_speed = self._make_h_slider()
@@ -178,7 +209,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._status = QtWidgets.QLabel("Ready")
         self._status.setStyleSheet(
             f"color: {COLOR_TEXT}; font-family: '{FONT_FAMILY}'; "
-            f"font-size: 10px; padding: 2px 6px;")
+            f"font-size: {FONT_SIZE}px; padding: 4px 8px;")
         root.addWidget(self._status)
 
         # 初始化滑动条默认值

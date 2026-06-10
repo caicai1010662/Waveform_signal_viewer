@@ -32,25 +32,39 @@ SPEED_MUL_MIN  = 0.5
 SPEED_MUL_MAX  = 1.5
 
 # ── 数据驱动参数 ──────────────────────────────────────────
-Y_PERCENTILE   = 99.9
-SPACING_FACTOR = 10.0
+Y_PERCENTILE   = 99.5         # 过滤极端毛刺，让主体波形更饱满
+SPACING_FACTOR = 1.5           # 缩小通道留白，波形填满屏幕
 
 # ── 配色 — 极简工业风 ─────────────────────────────────────
-COLOR_BG       = "#0A0A0A"   # 画布底色 — 极致深黑
-COLOR_ORIG     = "#FFFFFF"   # 原始信号 — 纯白
-COLOR_RECON    = "#FFD600"   # 重建信号 — 亮黄
-COLOR_GRID     = "#262626"   # 辅助线/刻度 — 极暗灰
-COLOR_ACCENT   = "#FF4500"   # 交互/Hover/选中 — 橙红
-COLOR_TEXT     = "#A0A0A0"   # 文字 — 中性灰
-COLOR_CARD     = "#0F0F12"   # 卡片/面板底色
-COLOR_SEP      = "#1F1F24"   # 分隔线
-COLOR_SLIDER   = "#2A2A30"   # 滑动条底色
-COLOR_HOVER    = "#353540"   # 按钮悬停
+# COLOR_BG       = "#2C2C2C"   # 画布底色 — 极致深黑
+# COLOR_ORIG     = "#FFFFFF"   # 原始信号 — 纯白
+# COLOR_RECON    = "#FFD600"   # 重建信号 — 亮黄
+# COLOR_GRID     = "#FF0000"   # 辅助线/刻度 — 极暗灰
+# COLOR_ACCENT   = "#FF4500"   # 交互/Hover/选中 — 橙红
+# COLOR_TEXT     = "#A0A0A0"   # 文字 — 中性灰
+# COLOR_CARD     = "#0F0F12"   # 卡片/面板底色
+# COLOR_SEP      = "#1F1F24"   # 分隔线
+# COLOR_SLIDER   = "#2A2A30"   # 滑动条底色
+# COLOR_HOVER    = "#353540"   # 按钮悬停
+
+# SignalViewer 配色方案 (高对比度 / 清晰区分)
+
+COLOR_BG         = "#0A0A0A"  # 画布底色：极致深黑，减少眩光
+COLOR_CARD       = "#1A1A1E"  # 波形面板：深灰蓝，与背景形成层级
+COLOR_ORIG       = "#00FF9F"  # 原始信号：薄荷绿（高亮且护眼）
+COLOR_RECON      = "#FFD600"  # 重建信号：亮黄（与绿色形成视觉冷暖差）
+COLOR_GRID       = "#2D2D35"  # 辅助线/刻度：深灰色（隐形辅助，不干扰数据）
+COLOR_ACCENT     = "#FF4500"  # 交互/选中/高亮：橙红（极强的视觉抓取点）
+COLOR_TEXT       = "#B0B0B0"  # 文字/标签：中性浅灰（保证可读性）
+COLOR_SEP        = "#3D3D48"  # 分隔线：明度适中（划分空间）
+COLOR_SLIDER     = "#25252C"  # 滑动条底色：略重于面板色
+COLOR_HOVER      = "#4A4A58"  # 悬停反馈：较亮的冷灰，产生浮起感
+COLOR_ZEBRA      = "#0E0E14"  # 斑马纹交替行（比画布稍亮）
 
 # ── 字体 ──────────────────────────────────────────────────
 FONT_FAMILY = "Microsoft YaHei Mono"  # 等宽字体，适合信号显示
-FONT_SIZE   = 11
-FONT_SIZE_SMALL = 9
+FONT_SIZE   = 20
+FONT_SIZE_SMALL = 15
 
 # ── 样式表 ────────────────────────────────────────────────
 STYLESHEET = f"""
@@ -77,8 +91,10 @@ QPushButton:disabled {{
     color: #3A3A40; border-color: #1A1A20; background: #0D0D10;
 }}
 QPushButton:checked {{
-    border-color: {COLOR_ACCENT}; color: {COLOR_ORIG};
-    background: #1C1C22;
+    border: 2px solid {COLOR_ORIG};
+    color: {COLOR_BG};
+    background: {COLOR_ORIG};
+    font-weight: bold;
 }}
 
 /* ── 滑动条 ───────────────────────────────────────── */
@@ -144,5 +160,5 @@ QMessageBox QLabel {{
 
 # ── pyqtgraph 全局配置 ────────────────────────────────────
 pg.setConfigOptions(antialias=False, useOpenGL=False)
-pg.setConfigOption('background', COLOR_BG)
-pg.setConfigOption('foreground', COLOR_GRID)
+pg.setConfigOption('background', COLOR_CARD)   # 卡片底色，与纯黑背景区分层级
+pg.setConfigOption('foreground', COLOR_TEXT)   # 坐标轴文字使用浅灰

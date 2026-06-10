@@ -1,5 +1,5 @@
 """
-grid.py — 网格视图（窗口裁剪 + 对象池）
+grid.py — 网格视图（窗口裁剪 + 对象池 + 零线 + 斑马纹）
 
   GridView  : Row 模式 + Tile 模式。
               仅创建可见通道曲线（对象池），每条曲线只存当前时窗数据。
@@ -15,24 +15,24 @@ import numpy as np
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
-from config import (COLOR_BG, COLOR_ORIG, COLOR_RECON, COLOR_GRID,
-                     COLOR_TEXT, COLOR_SEP, TILE_COLS, VISIBLE_ROWS,
-                     VISIBLE_TILE_ROWS, LINE_WIDTH, SPACING_FACTOR)
+from config import (COLOR_BG, COLOR_CARD, COLOR_ORIG, COLOR_RECON, COLOR_GRID,
+                     COLOR_TEXT, COLOR_SEP, COLOR_ZEBRA, TILE_COLS,
+                     VISIBLE_ROWS, VISIBLE_TILE_ROWS, LINE_WIDTH,
+                     SPACING_FACTOR)
 from data import SignalData
 from utils import make_font, make_pen, format_channel_label
 
-# 每条曲线最大点数 = 200ms × 30kHz ≈ 6000，远小于屏幕像素数时才降采样
 MAX_POINTS_PER_CURVE = 6000
 
 
 class GridView(QtWidgets.QWidget):
-    """网格视图 — 窗口裁剪 + 对象池。
+    """网格视图 — 窗口裁剪 + 对象池 + 零线 + 斑马纹。
 
     - Row 模式: VISIBLE_ROWS 条曲线/侧，一通道一行，垂直堆叠
     - Tile 模式: VISIBLE_TILE_ROWS × TILE_COLS 个栅格/侧
-    - 每条曲线只存 window_pts 个点（不存全量时间序列）
-    - 播放: 每帧 setData 更新窗口
-    - 滚动: 换绑通道 + 更新窗口
+    - 每条曲线只存 window_pts 个点
+    - 每个通道有零基线（基准线）
+    - 交替行背景（斑马纹）防止串行
     """
 
     channel_clicked = QtCore.pyqtSignal(int)
@@ -46,19 +46,23 @@ class GridView(QtWidgets.QWidget):
         self._y_offsets: np.ndarray = None
         self._total_height: float = 0.0
         self._ch_offset: int = 0
-        self._last_ptr: int = -1          # 上次渲染的 ptr，避免重复更新
+        self._last_ptr: int = -1
 
-        # 对象池（只存可见数量）
+        # 对象池
         self._curves_orig: list[pg.PlotDataItem] = []
         self._curves_recon: list[pg.PlotDataItem] = []
-        self._labels: list[pg.TextItem] = []
+        self._labels_l: list[pg.TextItem] = []   # 左侧标签
+        self._labels_r: list[pg.TextItem] = []   # 右侧标签
+        self._zero_lines_l: list[pg.InfiniteLine] = []  # 左侧零线
+        self._zero_lines_r: list[pg.InfiniteLine] = []  # 右侧零线
+        self._zebra_rects: list[pg.LinearRegionItem] = []  # 斑马纹
         self._tiles_orig: dict[tuple, tuple] = {}
         self._tiles_recon: dict[tuple, tuple] = {}
 
         self._build_ui()
 
     # ═══════════════════════════════════════════════════════════
-    # UI 框架（只执行一次）
+    # UI 框架
     # ═══════════════════════════════════════════════════════════
 
     def _build_ui(self):
@@ -72,12 +76,16 @@ class GridView(QtWidgets.QWidget):
         row_lay.setContentsMargins(0, 0, 0, 0)
         row_lay.setSpacing(0)
 
-        self._left_pw = pg.PlotWidget(background=COLOR_BG)
+        self._left_pw = pg.PlotWidget(background=COLOR_CARD)
         self._left_pi = self._left_pw.getPlotItem()
         self._left_vb = self._left_pi.getViewBox()
         self._config_plot(self._left_pi)
 
-        self._right_pw = pg.PlotWidget(background=COLOR_BG)
+        self._sep_v = self._make_vsep()
+        self._sep_v.setStyleSheet(
+            f"border: none; background-color: {COLOR_SEP};")
+
+        self._right_pw = pg.PlotWidget(background=COLOR_CARD)
         self._right_pi = self._right_pw.getPlotItem()
         self._right_vb = self._right_pi.getViewBox()
         self._config_plot(self._right_pi)
@@ -85,7 +93,7 @@ class GridView(QtWidgets.QWidget):
         self._left_vb.sigYRangeChanged.connect(self._sync_y_range)
 
         row_lay.addWidget(self._left_pw, 1)
-        row_lay.addWidget(self._make_vsep())
+        row_lay.addWidget(self._sep_v)
         row_lay.addWidget(self._right_pw, 1)
 
         # ── Tile 模式 ────────────────────────────────────
@@ -95,9 +103,9 @@ class GridView(QtWidgets.QWidget):
         tile_lay.setSpacing(0)
 
         self._tile_left = pg.GraphicsLayoutWidget()
-        self._tile_left.setBackground(COLOR_BG)
+        self._tile_left.setBackground(COLOR_CARD)
         self._tile_right = pg.GraphicsLayoutWidget()
-        self._tile_right.setBackground(COLOR_BG)
+        self._tile_right.setBackground(COLOR_CARD)
 
         tile_lay.addWidget(self._tile_left, 1)
         tile_lay.addWidget(self._make_vsep())
@@ -116,7 +124,7 @@ class GridView(QtWidgets.QWidget):
         f = QtWidgets.QFrame()
         f.setFrameShape(QtWidgets.QFrame.VLine)
         f.setStyleSheet(f"border: none; background-color: {COLOR_SEP};")
-        f.setFixedWidth(1)
+        f.setFixedWidth(2)
         return f
 
     def _config_plot(self, pi: pg.PlotItem):
@@ -124,7 +132,8 @@ class GridView(QtWidgets.QWidget):
         pi.setMouseEnabled(x=False, y=False)
         pi.setMenuEnabled(False)
         pi.hideAxis('left')
-        pi.hideAxis('bottom')
+        pi.showAxis('bottom')
+        pi.setLabel('bottom', 'Time', units='s')
 
     # ═══════════════════════════════════════════════════════════
     # 模式切换
@@ -148,7 +157,7 @@ class GridView(QtWidgets.QWidget):
             self.set_offset(self._sd, 0)
 
     # ═══════════════════════════════════════════════════════════
-    # 构建 — 仅创建可见数量的曲线对象（对象池）
+    # 构建
     # ═══════════════════════════════════════════════════════════
 
     def build(self):
@@ -168,11 +177,44 @@ class GridView(QtWidgets.QWidget):
             self._build_tile_pool(sd)
 
     def _build_row_pool(self, sd: SignalData):
-        """Row 模式：创建 VISIBLE_ROWS 条曲线对象（空池，等数据填充）。"""
+        """Row 模式：创建 VISIBLE_ROWS 条曲线 + 零线 + 斑马纹 + 左右标签。"""
         n_pool = min(VISIBLE_ROWS, sd.n_chan)
         w = sd.window_sec
+        row_h = self._total_height / max(1, sd.n_chan)
 
-        for _ in range(n_pool):
+        # 斑马纹 — 交替行背景
+        for i in range(n_pool):
+            if i % 2 == 1:
+                continue
+            abs_ch = i
+            offset = float(self._y_offsets[abs_ch])
+            zebra = pg.LinearRegionItem(
+                values=[offset - row_h / 2, offset + row_h / 2],
+                orientation='horizontal',
+                brush=pg.mkBrush(COLOR_ZEBRA),
+                pen=pg.mkPen(None))
+            zebra.setMovable(False)
+            self._left_pi.addItem(zebra)
+            self._zebra_rects.append(zebra)
+
+        # 曲线 + 零线 + 标签
+        for i in range(n_pool):
+            abs_ch = i
+            offset = float(self._y_offsets[abs_ch])
+
+            # 零基线（虚线）
+            zl = pg.InfiniteLine(pos=offset, angle=0,
+                                  pen=pg.mkPen(color=COLOR_GRID, width=0.5,
+                                               style=QtCore.Qt.DashLine))
+            zr = pg.InfiniteLine(pos=offset, angle=0,
+                                  pen=pg.mkPen(color=COLOR_GRID, width=0.5,
+                                               style=QtCore.Qt.DashLine))
+            self._left_pi.addItem(zl)
+            self._right_pi.addItem(zr)
+            self._zero_lines_l.append(zl)
+            self._zero_lines_r.append(zr)
+
+            # 信号曲线
             c_l = self._left_pi.plot(pen=make_pen(COLOR_ORIG, LINE_WIDTH))
             c_l.setDownsampling(auto=False)
             c_l.setSkipFiniteCheck(True)
@@ -183,20 +225,23 @@ class GridView(QtWidgets.QWidget):
             c_r.setSkipFiniteCheck(True)
             self._curves_recon.append(c_r)
 
-            lbl = pg.TextItem("", color=COLOR_TEXT, anchor=(0, 0.5))
-            lbl.setFont(make_font(8))
-            self._left_pi.addItem(lbl)
-            self._labels.append(lbl)
+            # 左侧标签
+            lbl_l = pg.TextItem("", color=COLOR_TEXT, anchor=(0, 0.5))
+            lbl_l.setFont(make_font(8))
+            self._left_pi.addItem(lbl_l)
+            self._labels_l.append(lbl_l)
 
-        # 填充初始数据
+            # 右侧标签
+            lbl_r = pg.TextItem("", color=COLOR_TEXT, anchor=(1, 0.5))
+            lbl_r.setFont(make_font(8))
+            self._right_pi.addItem(lbl_r)
+            self._labels_r.append(lbl_r)
+
         self._fill_row_data(sd, 0)
 
-        # 固定 X 范围
         self._left_vb.setXRange(0, w, padding=0)
         self._right_vb.setXRange(0, w, padding=0)
 
-        # Y 范围
-        row_h = self._total_height / max(1, sd.n_chan)
         self._left_vb.setYRange(
             max(0, self._total_height - n_pool * row_h),
             self._total_height, padding=0)
@@ -221,6 +266,7 @@ class GridView(QtWidgets.QWidget):
 
                 pi_l = self._tile_left.addPlot(row=r, col=c)
                 self._config_tile_plot(pi_l, abs_ch, font, y_lo, y_hi)
+                _add_tile_zero_line(pi_l, y_lo, y_hi)
                 c_l = pi_l.plot(pen=make_pen(COLOR_ORIG, 0.4))
                 c_l.setDownsampling(auto=False)
                 c_l.setSkipFiniteCheck(True)
@@ -228,6 +274,7 @@ class GridView(QtWidgets.QWidget):
 
                 pi_r = self._tile_right.addPlot(row=r, col=c)
                 self._config_tile_plot(pi_r, abs_ch, font, y_lo, y_hi)
+                _add_tile_zero_line(pi_r, y_lo, y_hi)
                 c_r = pi_r.plot(pen=make_pen(COLOR_RECON, 0.4))
                 c_r.setDownsampling(auto=False)
                 c_r.setSkipFiniteCheck(True)
@@ -261,43 +308,73 @@ class GridView(QtWidgets.QWidget):
         self._tile_right.clear()
         self._curves_orig.clear()
         self._curves_recon.clear()
-        self._labels.clear()
+        self._labels_l.clear()
+        self._labels_r.clear()
+        self._zero_lines_l.clear()
+        self._zero_lines_r.clear()
+        self._zebra_rects.clear()
         self._tiles_orig.clear()
         self._tiles_recon.clear()
 
     # ═══════════════════════════════════════════════════════════
-    # 数据填充 — 只加载当前窗口的采样点
+    # 数据填充
     # ═══════════════════════════════════════════════════════════
 
     def _fill_row_data(self, sd: SignalData, ptr: int):
-        """Row 模式：给对象池曲线填充当前窗口数据。"""
+        """Row 模式：填充当前窗口数据 + 更新零线/斑马纹/标签位置。"""
         wp = sd.window_pts
         if ptr + wp > sd.n_samples:
             ptr = max(0, sd.n_samples - wp)
         t_slice = slice(ptr, ptr + wp)
         t = np.arange(wp, dtype=np.float32) / sd.s_freq
-
-        # 按屏幕像素裁剪
         t, wp = _clip_to_screen(t, wp)
 
         n_pool = len(self._curves_orig)
+        row_h = self._total_height / max(1, sd.n_chan)
+
         for i in range(n_pool):
             abs_ch = self._ch_offset + i
-            if abs_ch >= sd.n_chan:
-                self._curves_orig[i].setVisible(False)
-                self._curves_recon[i].setVisible(False)
-                self._labels[i].setText("")
-                continue
-            self._curves_orig[i].setVisible(True)
-            self._curves_recon[i].setVisible(True)
+            active = abs_ch < sd.n_chan
 
-            offset = float(self._y_offsets[abs_ch])
-            self._curves_orig[i].setData(
-                t, sd.orig[abs_ch, t_slice][:wp] + offset)
-            self._curves_recon[i].setData(
-                t, sd.recon[abs_ch, t_slice][:wp] + offset)
-            self._labels[i].setText(format_channel_label(abs_ch))
-            self._labels[i].setPos(0.0005, offset)
+            if active:
+                offset = float(self._y_offsets[abs_ch])
+                self._curves_orig[i].setData(
+                    t, sd.orig[abs_ch, t_slice][:wp] + offset)
+                self._curves_recon[i].setData(
+                    t, sd.recon[abs_ch, t_slice][:wp] + offset)
+            else:
+                offset = 0.0
+
+            vis = active
+            self._curves_orig[i].setVisible(vis)
+            self._curves_recon[i].setVisible(vis)
+
+            # 零线
+            if i < len(self._zero_lines_l):
+                self._zero_lines_l[i].setPos(offset)
+                self._zero_lines_l[i].setVisible(vis)
+            if i < len(self._zero_lines_r):
+                self._zero_lines_r[i].setPos(offset)
+                self._zero_lines_r[i].setVisible(vis)
+
+            # 标签
+            lbl_text = format_channel_label(abs_ch) if active else ""
+            if i < len(self._labels_l):
+                self._labels_l[i].setText(lbl_text)
+                self._labels_l[i].setPos(0.0005, offset)
+            if i < len(self._labels_r):
+                self._labels_r[i].setText(lbl_text)
+                self._labels_r[i].setPos(sd.window_sec - 0.0005, offset)
+
+            # 斑马纹（仅偶数 i）
+            zi = i // 2
+            if i % 2 == 0 and zi < len(self._zebra_rects):
+                if active:
+                    rgn = self._zebra_rects[zi]
+                    rgn.setRegion([offset - row_h / 2, offset + row_h / 2])
+                    rgn.setVisible(True)
+                else:
+                    self._zebra_rects[zi].setVisible(False)
 
     def _fill_tile_data(self, sd: SignalData, ptr: int):
         """Tile 模式：给可见栅格填充当前窗口数据。"""
@@ -337,14 +414,10 @@ class GridView(QtWidgets.QWidget):
             self._right_vb.blockSignals(False)
 
     # ═══════════════════════════════════════════════════════════
-    # 播放 — 每帧更新窗口数据
+    # 播放
     # ═══════════════════════════════════════════════════════════
 
     def scroll(self, ptr: int, sd: SignalData):
-        """播放时每帧调用：更新可见通道的窗口数据。
-
-        如果 ptr 没变就跳过（避免重复渲染）。
-        """
         if ptr == self._last_ptr:
             return
         self._last_ptr = ptr
@@ -355,11 +428,10 @@ class GridView(QtWidgets.QWidget):
             self._fill_tile_data(sd, ptr)
 
     # ═══════════════════════════════════════════════════════════
-    # 通道滚动 — 换绑通道 + 填充当前窗口数据
+    # 通道滚动
     # ═══════════════════════════════════════════════════════════
 
     def set_offset(self, sd: SignalData, val: int):
-        """竖向浏览：更新可见通道范围 + 重新填充数据。"""
         if not sd.ready:
             return
         val = max(0, min(val, sd.max_channel_offset))
@@ -369,7 +441,6 @@ class GridView(QtWidgets.QWidget):
 
         if self._mode == "row":
             self._fill_row_data(sd, self._last_ptr if self._last_ptr >= 0 else 0)
-            # 更新 Y 视口
             n_pool = len(self._curves_orig)
             row_h = self._total_height / max(1, sd.n_chan)
             y_top = self._total_height - self._ch_offset * row_h
@@ -384,7 +455,6 @@ class GridView(QtWidgets.QWidget):
     # ═══════════════════════════════════════════════════════════
 
     def update_ranges(self, sd: SignalData):
-        """时窗变化：更新 X 范围 + 重新填充数据。"""
         w = sd.window_sec
         if self._mode == "row":
             self._left_vb.setXRange(0, w, padding=0)
@@ -398,7 +468,6 @@ class GridView(QtWidgets.QWidget):
             self._fill_tile_data(sd, self._last_ptr if self._last_ptr >= 0 else 0)
 
     def reload_amp(self, sd: SignalData):
-        """幅值缩放：重算 Y 偏移 + 更新数据 + Y 范围。"""
         if not sd.ready:
             return
         self._y_offsets = sd.y_offsets_all()
@@ -450,11 +519,10 @@ class GridView(QtWidgets.QWidget):
 
 
 # ═══════════════════════════════════════════════════════════════
-# 工具函数
+# 工具
 # ═══════════════════════════════════════════════════════════════
 
 def _clip_to_screen(t: np.ndarray, wp: int) -> tuple[np.ndarray, int]:
-    """如果点数超过屏幕分辨率，做简单的降采样（每隔 N 个取 1 个）。"""
     if wp > MAX_POINTS_PER_CURVE:
         step = wp // MAX_POINTS_PER_CURVE + 1
         return t[::step], len(t[::step])
@@ -466,3 +534,11 @@ def _update_tile_label(pi: pg.PlotItem, ch: int):
         if isinstance(item, pg.TextItem):
             item.setText(format_channel_label(ch))
             break
+
+
+def _add_tile_zero_line(pi: pg.PlotItem, y_lo: float, y_hi: float):
+    """在 tile PlotItem 中添加零基准线。"""
+    line = pg.InfiniteLine(pos=0, angle=0,
+                            pen=pg.mkPen(color=COLOR_GRID, width=0.5,
+                                         style=QtCore.Qt.DashLine))
+    pi.addItem(line)
