@@ -1,9 +1,10 @@
 """
-utils.py — 共享工具
+utils.py — 共享工具函数
 
-  make_font()           : Times New Roman 字体工厂（带缓存）
-  make_pen()            : pyqtgraph 画笔工厂（带缓存）
-  format_channel_label(): 通道标签格式化
+  提供字体创建、画笔创建、通道标签格式化等通用工具。
+  所有函数带 LRU 缓存，避免重复创建相同对象。
+
+  调参入口: 无。这些函数本身不含可调参数，它们从 config.py 读取字体/颜色。
 """
 
 from functools import lru_cache
@@ -14,30 +15,81 @@ import pyqtgraph as pg
 from config import FONT_FAMILY, FONT_SIZE, FONT_SIZE_SMALL
 
 
+# ═══════════════════════════════════════════════════════════════
+# 字体工厂 — 创建 QFont 对象，带 LRU 缓存
+# ═══════════════════════════════════════════════════════════════
+
 @lru_cache(maxsize=32)
 def make_font(size: int = FONT_SIZE, weight: int = 400) -> QtGui.QFont:
-    """创建 Times New Roman 字体。"""
+    """创建字体对象。
+
+    Args:
+        size:   字号。默认从 config.FONT_SIZE 读取（16px）
+        weight: 粗细。400=正常, 700=加粗
+
+    用法:
+        font = make_font(12)         # 12px 正常
+        font = make_font(14, 700)    # 14px 加粗
+
+    缓存: 同样参数只创建一次，后续调用直接返回缓存对象。
+    """
     font = QtGui.QFont(FONT_FAMILY, size)
     font.setWeight(weight)
     return font
 
 
+# ═══════════════════════════════════════════════════════════════
+# 画笔工厂 — 创建 pyqtgraph 画笔，带 LRU 缓存
+# ═══════════════════════════════════════════════════════════════
+
 @lru_cache(maxsize=128)
 def make_pen(color: str, width: float = 0.6) -> pg.mkPen:
-    """创建 pyqtgraph 画笔。"""
+    """创建 pyqtgraph 画笔对象。
+
+    Args:
+        color: 颜色，如 "#4FC1FF" 或 config.COLOR_ORIG
+        width: 线宽（像素）。默认 0.6，信号线通常用 1.0~1.5
+
+    用法:
+        pen = make_pen("#FFFFFF", 1.2)   # 白色 1.2px 线
+    """
     return pg.mkPen(color=color, width=width)
 
 
+# ═══════════════════════════════════════════════════════════════
+# 通道标签格式化
+# ═══════════════════════════════════════════════════════════════
+
 def format_channel_label(ch: int) -> str:
-    """格式化通道标签，例如: "Ch1", "Ch42"。"""
+    """将 0-based 通道索引转为人类可读标签。
+
+    Args:
+        ch: 通道索引，0 = 第 1 个通道
+
+    Returns:
+        "Ch1", "Ch2", ..., "Ch2048"
+    """
     return f"Ch{ch + 1}"
 
 
+# ═══════════════════════════════════════════════════════════════
+# 固定文本标签（用于通道编号等静态文字）
+# ═══════════════════════════════════════════════════════════════
+
 def make_fixed_label(text: str, font_size: int = FONT_SIZE_SMALL,
                      color: str = "#A0A0A0") -> pg.TextItem:
-    """创建固定文本标签（用于通道编号等）。"""
+    """在波形图上创建固定位置的文本标签。
+
+    Args:
+        text:      显示的文本
+        font_size: 字号
+        color:     文字颜色
+
+    返回:
+        pg.TextItem 对象，可用 setPos(x, y) 定位
+    """
     from config import COLOR_TEXT
     c = color if color else COLOR_TEXT
-    label = pg.TextItem(text, color=c, anchor=(0, 0.5))
+    label = pg.TextItem(text, color=c, anchor=(0, 0.5))  # 左侧垂直居中锚点
     label.setFont(make_font(font_size))
     return label
