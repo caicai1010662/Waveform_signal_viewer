@@ -20,16 +20,16 @@ from config import FONT_FAMILY, FONT_SIZE, FONT_SIZE_SMALL
 # ═══════════════════════════════════════════════════════════════
 
 @lru_cache(maxsize=32)
-def make_font(size: int = FONT_SIZE, weight: int = 400) -> QtGui.QFont:
-    """创建字体对象。
+def make_font(size: int = FONT_SIZE, weight: int = 700) -> QtGui.QFont:
+    """创建字体对象。默认加粗。
 
     Args:
         size:   字号。默认从 config.FONT_SIZE 读取（16px）
-        weight: 粗细。400=正常, 700=加粗
+        weight: 粗细。700=加粗（默认）, 400=正常
 
     用法:
-        font = make_font(12)         # 12px 正常
-        font = make_font(14, 700)    # 14px 加粗
+        font = make_font(12)         # 12px 加粗
+        font = make_font(14, 400)    # 14px 正常
 
     缓存: 同样参数只创建一次，后续调用直接返回缓存对象。
     """

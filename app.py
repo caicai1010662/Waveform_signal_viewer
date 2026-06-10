@@ -340,7 +340,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _load_orig(self):
         """加载原始信号 .mat 文件。"""
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Select Original .mat File", "",
+            self, "Select Rawdata .mat File", "",
             "MAT Files (*.mat);;All (*)")
         if not path:
             return
@@ -355,7 +355,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._btn_recon.setEnabled(True)  # 原始加载完才能加载重建
             self._update_status()
 
-        self._load_mat_async(path, "Loading Original Signal", on_done)
+        self._load_mat_async(path, "Loading Rawdata", on_done)
 
     def _load_recon(self):
         """加载重建信号 .mat 文件。
@@ -367,7 +367,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._sd.orig is None:
             return
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Select Reconstructed .mat File", "",
+            self, "Select Recdata .mat File", "",
             "MAT Files (*.mat);;All (*)")
         if not path:
             return
@@ -381,8 +381,8 @@ class MainWindow(QtWidgets.QMainWindow):
                     else:
                         raise ValueError(
                             f"Channel count mismatch! "
-                            f"Original: {self._sd.n_chan}, "
-                            f"Reconstructed: {recon.shape[0]}")
+                            f"Rawdata: {self._sd.n_chan}, "
+                            f"Recdata: {recon.shape[0]}")
 
                 # ── 长度对齐（取较短者）─────────────────────
                 min_len = min(self._sd.n_samples, recon.shape[1])
@@ -426,7 +426,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 QtWidgets.QMessageBox.critical(
                     self, "Error", f"Loading failed:\n{e}")
 
-        self._load_mat_async(path, "Loading Reconstructed Signal", on_done)
+        self._load_mat_async(path, "Loading Recdata", on_done)
 
     def _load_mat_async(self, path: str, title: str, on_done):
         """异步加载 .mat 文件。

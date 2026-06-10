@@ -42,7 +42,7 @@ class DetailWindow(QtWidgets.QMainWindow):
         y_lo, y_hi = sd.y_range_detail(ch)
         amp_val = sd.ch_amp[ch] if sd.ch_amp is not None else 0.0
         self.setWindowTitle(
-            f"Ch{ch + 1}  —  Original vs Reconstructed  |  "
+            f"Ch{ch + 1}  —  Rawdata vs Recdata  |  "
             f"Amplitude {amp_val:.1f} µV")
         self.resize(1200, 420)
 
@@ -65,7 +65,8 @@ class DetailWindow(QtWidgets.QMainWindow):
 
         self._lbl_info = QtWidgets.QLabel()
         self._lbl_info.setStyleSheet(
-            f"color: {COLOR_TEXT}; font-family: '{FONT_FAMILY}'; font-size: 10px;")
+            f"color: {COLOR_TEXT}; font-family: '{FONT_FAMILY}'; "
+            f"font-size: 10px; font-weight: bold;")
 
         top.addWidget(self._btn_toggle)
         top.addStretch(1)
@@ -97,6 +98,9 @@ class DetailWindow(QtWidgets.QMainWindow):
         glw.setBackground(COLOR_BG)
         p = glw.addPlot()
 
+        font_tick = make_font(9)           # 刻度字号
+        font_label = make_font(10)         # 轴标签、图例字号
+
         # 坐标轴标签
         p.setLabel('left', 'µV', color=COLOR_TEXT)
         p.setLabel('bottom', 'Time', units='s', color=COLOR_TEXT)
@@ -104,7 +108,10 @@ class DetailWindow(QtWidgets.QMainWindow):
             ax = p.getAxis(ax_name)
             ax.setPen(COLOR_GRID)
             ax.setTextPen(COLOR_TEXT)
-            ax.setTickFont(make_font(9))
+            ax.setTickFont(font_tick)
+            # 显式设置轴标签字体（pyqtgraph 内部 TextItem，不走 QSS）
+            if hasattr(ax, 'label') and ax.label is not None:
+                ax.label.setFont(font_label)
 
         p.showGrid(x=True, y=True, alpha=0.06)  # 半透明网格
         p.setYRange(y_lo, y_hi, padding=0)
@@ -113,14 +120,15 @@ class DetailWindow(QtWidgets.QMainWindow):
         p.setMouseEnabled(x=False, y=False)
         p.setMenuEnabled(False)
 
-        # 图例（右上角）
-        p.addLegend(offset=(1, 1))
+        # 图例（右上角）— 显式设置字体
+        legend = p.addLegend(offset=(1, 1))
+        legend.setFont(font_label)
 
-        # 原始信号曲线（白/蓝）+ 重建信号曲线（黄）
+        # Rawdata（白/蓝）+ Recdata（黄）
         self._overlay_orig = p.plot(
-            pen=pg.mkPen(color=COLOR_ORIG, width=1.2), name="Original")
+            pen=pg.mkPen(color=COLOR_ORIG, width=1.2), name="Rawdata")
         self._overlay_recon = p.plot(
-            pen=pg.mkPen(color=COLOR_RECON, width=1.2), name="Reconstructed")
+            pen=pg.mkPen(color=COLOR_RECON, width=1.2), name="Recdata")
 
         # 开启 pyqtgraph 自动降采样（渲染时根据屏幕像素自动压缩）
         self._overlay_orig.setDownsampling(auto=True, method='peak')
@@ -140,23 +148,31 @@ class DetailWindow(QtWidgets.QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        font = make_font(9)
+        font_tick = make_font(9)           # 刻度字号
+        font_label = make_font(10)         # 轴标签字号
+        font_title = make_font(11)         # 面板标题字号
 
         for clr, bg, label_text in [
-            (COLOR_ORIG, COLOR_BG, "Original"),        # 左: 原始
-            (COLOR_RECON, COLOR_BG, "Reconstructed")   # 右: 重建
+            (COLOR_ORIG, COLOR_BG, "Rawdata"),        # 左: Rawdata
+            (COLOR_RECON, COLOR_BG, "Recdata")        # 右: Recdata
         ]:
             glw = pg.GraphicsLayoutWidget()
             glw.setBackground(bg)
             p = glw.addPlot()
             p.setLabel('left', 'µV', color=COLOR_TEXT)
             p.setLabel('bottom', 'Time', units='s', color=COLOR_TEXT)
-            p.setTitle(label_text, color=COLOR_TEXT, size='10pt')
+            # 标题 — 用 QFont 替代字符串 size
+            p.setTitle(label_text, color=COLOR_TEXT)
+            if hasattr(p, 'titleLabel') and p.titleLabel is not None:
+                p.titleLabel.setFont(font_title)
             for ax_name in ('left', 'bottom'):
                 ax = p.getAxis(ax_name)
                 ax.setPen(COLOR_GRID)
                 ax.setTextPen(COLOR_TEXT)
-                ax.setTickFont(font)
+                ax.setTickFont(font_tick)
+                # 显式设置轴标签字体
+                if hasattr(ax, 'label') and ax.label is not None:
+                    ax.label.setFont(font_label)
             p.showGrid(x=True, y=True, alpha=0.06)
             p.setYRange(y_lo, y_hi, padding=0)
             p.setXRange(0, self._sd.window_sec, padding=0)
@@ -210,7 +226,7 @@ class DetailWindow(QtWidgets.QMainWindow):
 
         amp_val = sd.ch_amp[self._ch] if sd.ch_amp is not None else 0.0
         self.setWindowTitle(
-            f"Ch{self._ch + 1}  —  Original vs Reconstructed  |  "
+            f"Ch{self._ch + 1}  —  Rawdata vs Recdata  |  "
             f"Amplitude {amp_val:.1f} µV")
 
     # ═════════════════════════════════════════════════════

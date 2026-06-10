@@ -44,8 +44,6 @@ class GridView(QtWidgets.QWidget):
 
     信号:
         channel_clicked(int) — 用户点击某通道，发射绝对通道索引
-        wheel_time(int)      — 滚轮滚动，+1=放大 -1=缩小时窗
-        wheel_amp(int)       — Shift+滚轮，+1=拉大 -1=缩小幅值
 
     内部模式:
         "row"  — 一行一通道（Compare 按钮）

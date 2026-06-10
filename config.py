@@ -118,9 +118,9 @@ COLOR_ZEBRA  = "#222222"  # 斑马纹交替行底色（Row 模式每隔一个通
 # 七、字体 — 全局统一字体和字号
 # ═══════════════════════════════════════════════════════════════
 
-FONT_FAMILY = "Consolas"       # 主字体。也可换成 "Microsoft YaHei Mono" 等
+FONT_FAMILY = "Microsoft YaHei Mono"  # 主字体。等宽中英文字体
 FONT_SIZE   = 16               # 全局字号（窗口标题、标签、状态栏等）
-FONT_SIZE_SMALL = 13           # 小字号（按钮文字等）
+FONT_SIZE_SMALL = 16           # 小字号（按钮文字等）
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -133,9 +133,9 @@ STYLESHEET = f"""
 QWidget {{
     background-color: {COLOR_BG};
     color: {COLOR_TEXT};
-    font-family: "{FONT_FAMILY}", "Microsoft YaHei Mono";
+    font-family: "{FONT_FAMILY}", "Consolas", monospace;
     font-size: {FONT_SIZE}px;
-    font-weight: 400;
+    font-weight: bold;
 }}
 
 /* ── 普通按钮 (Load / Start / Loop / Compare / Browse / Roll) ── */

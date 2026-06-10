@@ -22,8 +22,10 @@ if __name__ == '__main__':
     # 1. 创建 Qt 应用程序
     app = QtWidgets.QApplication(sys.argv)
 
-    # 2. 设置全局默认字体（所有控件继承）
-    app.setFont(QtGui.QFont(FONT_FAMILY, FONT_SIZE))
+    # 2. 设置全局默认字体（所有控件继承，加粗）
+    font = QtGui.QFont(FONT_FAMILY, FONT_SIZE)
+    font.setBold(True)
+    app.setFont(font)
 
     # 3. Fusion 风格 — 跨平台一致的现代扁平外观
     app.setStyle('Fusion')
