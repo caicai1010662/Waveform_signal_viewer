@@ -8,8 +8,7 @@ grid.py — 网格视图（核心渲染模块）
     1. 对象池 (Object Pool)    — 只创建 VISIBLE_ROWS 条曲线，滚动时复用
     2. 窗口裁剪 (Window Clipping)— 每条曲线只存 window_pts(~1500) 个点
     3. 视口剔除 (Viewport Culling)— 只渲染看得见的通道
-    4. 零基线 (Zero Baseline)   — 每个通道画虚线参考线
-    5. 斑马纹 (Zebra Striping)  — 交替行背景防止串行
+    4. 斑马纹 (Zebra Striping)  — 交替行背景防止串行
 
   Row 模式 (Compare): VISIBLE_ROWS 条曲线/侧，一通道一行，垂直堆叠
   Tile 模式 (Browse): VISIBLE_TILE_ROWS × TILE_COLS 个栅格/侧
@@ -27,7 +26,7 @@ import numpy as np
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
-from config import (COLOR_BG, COLOR_CARD, COLOR_ORIG, COLOR_RECON, COLOR_GRID,
+from config import (COLOR_BG, COLOR_CARD, COLOR_ORIG, COLOR_RECON,
                      COLOR_TEXT, COLOR_SEP, COLOR_ZEBRA, TILE_COLS,
                      VISIBLE_ROWS, VISIBLE_TILE_ROWS, LINE_WIDTH,
                      SPACING_FACTOR, FONT_SIZE)
@@ -40,7 +39,7 @@ MAX_POINTS_PER_CURVE = 6000
 
 
 class GridView(QtWidgets.QWidget):
-    """网格视图 — 窗口裁剪 + 对象池 + 零线 + 斑马纹。
+    """网格视图 — 窗口裁剪 + 对象池 + 斑马纹。
 
     信号:
         channel_clicked(int) — 用户点击某通道，发射绝对通道索引
@@ -60,7 +59,6 @@ class GridView(QtWidgets.QWidget):
 
         # ── Y 轴偏移（8KB，存所有 2048 通道的 Y 中心位置）──
         self._y_offsets: np.ndarray = None
-        self._total_height: float = 0.0    # 所有通道堆叠的总高度
 
         # ── 视口状态 ──────────────────────────────────────
         self._ch_offset: int = 0           # 当前可见的第一个通道索引
@@ -210,7 +208,6 @@ class GridView(QtWidgets.QWidget):
 
         # 计算全量 Y 偏移（8KB，可忽略）
         self._y_offsets = sd.y_offsets_all()
-        self._total_height = float(sd.total_y_height)
         self._ch_offset = 0
         self._last_ptr = -1
 
@@ -220,7 +217,7 @@ class GridView(QtWidgets.QWidget):
             self._build_tile_pool(sd)
 
     def _build_row_pool(self, sd: SignalData):
-        """Row 模式对象池: VISIBLE_ROWS 条曲线 + 零线 + 斑马纹 + 左右标签。
+        """Row 模式对象池: VISIBLE_ROWS 条曲线 + 斑马纹 + 左右标签。
 
         关键: 只创建 VISIBLE_ROWS 条曲线（不是 2048 条）。
               滚动时通过 _fill_row_data 换绑数据，不创建新对象。
@@ -253,7 +250,7 @@ class GridView(QtWidgets.QWidget):
             self._right_pi.addItem(zebra_r)
             self._zebra_rects_r.append(zebra_r)
 
-        # ── 曲线 + 零线 + 标签 ────────────────────────────
+        # ── 曲线 + 标签 ────────────────────────────────
         for i in range(n_pool):
             abs_ch = i
             offset = float(self._y_offsets[abs_ch])
@@ -302,7 +299,6 @@ class GridView(QtWidgets.QWidget):
     def _build_tile_pool(self, sd: SignalData):
         """Tile 模式: 创建栅格网格。
 
-        每个 tile 是一个独立的 PlotItem（含零线）。
         GraphicsLayoutWidget 自动管理行列布局。
         """
         n_rows = min(VISIBLE_TILE_ROWS,
@@ -344,14 +340,16 @@ class GridView(QtWidgets.QWidget):
     def _config_tile_plot(self, pi: pg.PlotItem, ch: int,
                           font: QtGui.QFont, y_lo: float, y_hi: float):
         """配置单个 Tile 的 PlotItem。返回 label 引用供后续换绑。"""
-        pi.getViewBox().setBackgroundColor(COLOR_CARD)  # 每个格子刷卡片色
+        pi.getViewBox().setBackgroundColor(COLOR_CARD)
+        # 每个 tile 加外框，在密集栅格中区分相邻通道
+        pi.getViewBox().setBorder(pg.mkPen(color=COLOR_SEP, width=1.5))
         pi.hideButtons()
         pi.setMouseEnabled(x=False, y=False)
         pi.setMenuEnabled(False)
         pi.hideAxis('left')
         pi.hideAxis('bottom')
         pi.setYRange(y_lo, y_hi, padding=0)
-        # 标签 — 左下角锚点 + 底色，与 Compare 模式统一
+        # 标签 — 左下角锚点，统一底色
         label = pg.TextItem(format_channel_label(ch),
                             color=COLOR_TEXT, anchor=(0, 1),
                             fill=pg.mkBrush(COLOR_CARD))
@@ -363,7 +361,7 @@ class GridView(QtWidgets.QWidget):
         return label
 
     def clear(self):
-        """清空所有曲线、标签、零线、斑马纹、tile。
+        """清空所有曲线、标签、斑马纹、tile。
 
         在模式切换和 rebuild 时调用。
         """
@@ -383,7 +381,7 @@ class GridView(QtWidgets.QWidget):
     # ═══════════════════════════════════════════════════════════
     # 数据填充 — 热路径，每次滚动/每帧播放都调用
     #    从 memmap 读取当前窗口数据 → setData 到曲线
-    #    同时更新零线位置、标签位置、斑马纹位置
+    #    同时更新标签位置、斑马纹位置
     # ═══════════════════════════════════════════════════════════
 
     def _fill_row_data(self, sd: SignalData, ptr: int):
@@ -475,7 +473,6 @@ class GridView(QtWidgets.QWidget):
                 curve.setVisible(True)
                 label.setText(format_channel_label(abs_ch))
                 label.setVisible(True)
-                # 标签位置跟随新通道的 Y 范围变化，防止错位/重叠
                 ch_amp = float(sd.ch_amp[abs_ch]) * sd.amp_scale
                 y_lo = -ch_amp * 1.2
                 y_hi = ch_amp * 1.2
@@ -570,7 +567,6 @@ class GridView(QtWidgets.QWidget):
         if not sd.ready:
             return
         self._y_offsets = sd.y_offsets_all()
-        self._total_height = float(sd.total_y_height)
 
         if self._mode == "row":
             self._fill_row_data(sd, self._last_ptr if self._last_ptr >= 0 else 0)

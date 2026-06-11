@@ -1,15 +1,15 @@
 """
 player.py — 播放引擎
 
-  Player  : 精确 QTimer 驱动播放，60fps 同步信号，帧丢弃保护。
-            支持循环模式（Loop / Once），变速播放（0.1× ~ 10.0×）。
+  Player  : 精确 QTimer 驱动播放，80fps 同步信号，帧丢弃保护。
+            支持循环模式（Loop / Once），变速播放（0.5× ~ 1.5×）。
             grid / detail 两个视图共用同一个 Player 实例。
 
   信号流:
     QTimer._tick() → frame_ready(ptr) → 各视图更新 → Player.ack()
 
   调参入口:
-    config.TARGET_FPS      — 目标帧率（默认 60）
+    config.TARGET_FPS      — 目标帧率（默认 80）
     config.PLAYBACK_SPEED  — 基础播放速度
     SPEED_MUL_MIN/MAX      — 变速范围
 """
@@ -20,6 +20,9 @@ from config import TARGET_FPS, PLAYBACK_SPEED, SPEED_MUL_MIN, SPEED_MUL_MAX
 
 class Player(QtCore.QObject):
     """定时器驱动播放引擎。
+
+    特性:
+      80fps 精确帧率，_pending 锁丢帧保护，循环/单次两种播放模式。
 
     信号:
         frame_ready(int)   — 每帧发射，携带当前采样点位置（ptr）
@@ -120,16 +123,21 @@ class Player(QtCore.QObject):
         self.speed_changed.emit(self.speed_mul)
 
     def speed_up(self):
-        """加快一档。Ctrl+↑ 键调用。"""
-        for s in [0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 10.0]:
-            if s > self.speed_mul:
+        """加快一档。Ctrl+↑ 键调用。
+
+        档位表与 SPEED_MUL_MIN/MAX 对齐：
+        当前 MIN=0.5, MAX=1.5 → 三档 [0.5, 1.0, 1.5]。
+        扩大范围时只需同步改此列表。
+        """
+        for s in [0.5, 1.0, 1.5]:
+            if s > self.speed_mul + 0.001:  # 浮点安全余量
                 self.set_speed(s)
                 return
 
     def speed_down(self):
         """减慢一档。Ctrl+↓ 键调用。"""
-        for s in [10.0, 8.0, 4.0, 2.0, 1.0, 0.5, 0.25, 0.1]:
-            if s < self.speed_mul:
+        for s in [1.5, 1.0, 0.5]:
+            if s < self.speed_mul - 0.001:
                 self.set_speed(s)
                 return
 
@@ -176,6 +184,7 @@ class Player(QtCore.QObject):
         if self.ptr + self.window_pts >= self.n_samples:
             if self.loop_mode:
                 self.ptr = 0           # 循环模式：回到开头
+                self._pending = False  # 显式清除（不依赖同步信号副作用）
             else:
                 self._pending = False
                 self.pause()           # 单次模式：自动暂停

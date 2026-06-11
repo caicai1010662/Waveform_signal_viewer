@@ -18,8 +18,10 @@ import weakref
 
 from pyqtgraph.Qt import QtCore, QtWidgets, QtGui
 
-from config import (COLOR_BG, COLOR_TEXT, COLOR_ACCENT, COLOR_CARD,
-                     COLOR_SEP, COLOR_HOVER, COLOR_ORIG, FONT_FAMILY, FONT_SIZE,
+from config import (COLOR_TEXT, COLOR_SEP, FONT_FAMILY,
+                     WIN_WIDTH, WIN_HEIGHT, WIN_X, WIN_Y,
+                     WIN_MAXIMIZED, WIN_TITLE,
+                     DETAIL_OFFSET_X, DETAIL_OFFSET_Y,
                      WINDOW_SEC, WINDOW_SEC_MIN, WINDOW_SEC_MAX,
                      AMP_SCALE_MIN, AMP_SCALE_MAX,
                      SPEED_MUL_MIN, SPEED_MUL_MAX)
@@ -48,8 +50,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("SignalViewer")
-        self.resize(1600, 900)
+        self.setWindowTitle(WIN_TITLE)
+        self.resize(WIN_WIDTH, WIN_HEIGHT)
+        # 窗口位置：WIN_X/WIN_Y ≥0 时指定坐标，否则由 OS 决定
+        if WIN_X >= 0 and WIN_Y >= 0:
+            self.move(WIN_X, WIN_Y)
+        if WIN_MAXIMIZED:
+            self.showMaximized()
 
         # ── 核心对象 ─────────────────────────────────────
         self._sd = SignalData()          # 数据容器（原始 + 重建）
@@ -63,6 +70,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._details: weakref.WeakSet = weakref.WeakSet()  # 详情窗弱引用集
         self._loader: LoaderWorker = None                   # 当前异步加载线程
         self._mode = "row"  # 当前显示模式: "row" | "tile"
+
+        # ── 通道滑块短防抖（30ms）─────────────────────────
+        self._ch_timer = QtCore.QTimer()
+        self._ch_timer.setSingleShot(True)
+        self._ch_timer.setInterval(30)
+        self._ch_timer.timeout.connect(self._on_ch_debounce)
 
         self._build()
         self._bind_keys()
@@ -149,6 +162,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._slider_win = self._make_h_slider()       # 滑条
         self._slider_win.valueChanged.connect(self._on_win_slider)
+        self._slider_win.sliderReleased.connect(self._on_win_released)
         bar.addWidget(self._slider_win)
 
         # ── 幅值滑动条组 ──────────────────────────────────
@@ -164,6 +178,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._slider_amp = self._make_h_slider()
         self._slider_amp.valueChanged.connect(self._on_amp_slider)
+        self._slider_amp.sliderReleased.connect(self._on_amp_released)
         bar.addWidget(self._slider_amp)
 
         # ── 速度滑动条组 ──────────────────────────────────
@@ -180,6 +195,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._slider_speed = self._make_h_slider()
         self._slider_speed.valueChanged.connect(self._on_speed_slider)
         bar.addWidget(self._slider_speed)
+
+        # ── 绝对时间戳（顶栏最右侧）──────────────────────
+        self._lbl_timestamp = QtWidgets.QLabel("00:00.000")
+        self._lbl_timestamp.setStyleSheet(
+            f"color: {COLOR_TEXT}; font-size: 18px; font-weight: bold;")
+        bar.addWidget(self._lbl_timestamp)
 
         root.addLayout(bar)
 
@@ -209,8 +230,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._slider_ch.setMaximum(0)              # 加载数据后更新
         self._slider_ch.setInvertedAppearance(True) # 向上拖 = 值增大
         self._slider_ch.setInvertedControls(True)
-        self._slider_ch.setFixedWidth(18)           # 滑条宽度（粗细）
+        self._slider_ch.setFixedWidth(22)           # 滑条宽度（与 QSS groove width 一致）
         self._slider_ch.valueChanged.connect(self._on_ch_scroll)
+        self._slider_ch.sliderReleased.connect(self._on_ch_released)
         self._slider_ch.setEnabled(False)
         wave_row.addWidget(self._slider_ch)
 
@@ -285,13 +307,25 @@ class MainWindow(QtWidgets.QMainWindow):
     # ═══════════════════════════════════════════════════════════
 
     def _bind_keys(self):
-        """绑定键盘快捷键 — 仅保留 Space 播放/暂停。"""
-        Shortcut = QtWidgets.QShortcut
-        QtKey = QtCore.Qt
-        KeySeq = QtGui.QKeySequence
+        """绑定键盘快捷键。"""
+        S = QtWidgets.QShortcut
+        K = QtCore.Qt
+        KS = QtGui.QKeySequence
 
-        Shortcut(KeySeq(QtKey.Key_Space), self,
-                 activated=lambda: self._player.toggle())           # 播放/暂停
+        S(KS(K.Key_Space), self,
+          activated=lambda: self._player.toggle())              # 播放/暂停
+        S(KS(K.Key_Left), self,
+          activated=lambda: self._player.seek_delta(-300))     # ← 步退 10ms
+        S(KS(K.Key_Right), self,
+          activated=lambda: self._player.seek_delta(300))      # → 步进 10ms
+        S(KS(K.Key_Up), self,
+          activated=self._ch_up)                                # ↑ 上滚通道
+        S(KS(K.Key_Down), self,
+          activated=self._ch_down)                              # ↓ 下滚通道
+        S(KS(K.Key_Up | K.CTRL), self,
+          activated=lambda: self._player.speed_up())           # Ctrl+↑ 加速
+        S(KS(K.Key_Down | K.CTRL), self,
+          activated=lambda: self._player.speed_down())         # Ctrl+↓ 减速
 
     # ═══════════════════════════════════════════════════════════
     # 模式切换
@@ -310,7 +344,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self._grid.build()
             self._slider_ch.setMaximum(
                 max(0, self._sd.max_channel_offset))
-        self._update_status()
 
     def _load_orig(self):
         """加载原始信号 .mat 文件。"""
@@ -327,8 +360,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._sd.s_freq = s_freq
             self._sd.n_chan = data.shape[0]
             self._sd.n_samples = data.shape[1]
-            self._btn_recon.setEnabled(True)  # 原始加载完才能加载重建
-            self._update_status()
+            self._btn_recon.setEnabled(True)
 
         self._load_mat_async(path, "Loading Rawdata", on_done)
 
@@ -392,7 +424,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._slider_ch.setEnabled(True)
 
                 self._reset_sliders()
-                self._update_status()
 
             except Exception as e:
                 QtWidgets.QMessageBox.critical(
@@ -406,7 +437,12 @@ class MainWindow(QtWidgets.QMainWindow):
         显示一个模态进度对话框（不停旋转的进度条），
         LoaderWorker 在后台线程中执行实际加载。
         完成后自动关闭对话框并调用 on_done 回调。
+
+        加载锁: 已有线程在运行时忽略重复点击，防止并发加载
+        导致 self._loader 被覆盖、旧线程信号连到已销毁对话框。
         """
+        if self._loader is not None and self._loader.isRunning():
+            return  # 已有加载任务在进行中，忽略重复点击
         dlg = QtWidgets.QProgressDialog("Loading...", None, 0, 0, self)
         dlg.setWindowTitle(title)
         dlg.setWindowModality(QtCore.Qt.WindowModal)
@@ -436,16 +472,25 @@ class MainWindow(QtWidgets.QMainWindow):
           2. _on_frame → grid.scroll(ptr)
           3. Player.ack() → 释放 _pending 锁
 
-        finally 块保证 ack() 一定执行：即使视图渲染抛异常，
-        _pending 锁也会释放，播放器不会永久冻结。
+        防御设计:
+          - 所有出口（正常/越界/异常）都调 ack()。
+          - finally 块保证即使 grid.scroll 抛异常，_pending 也不会永久卡死。
+          - 边界检查在 try 之前：ptr 越界时手动调 ack() 后 return，
+            不依赖 try/finally 的隐式覆盖。
         """
         if not self._sd.ready:
             return
+        ptr = self._player.ptr
+        # ── 边界保护：数据末尾时窗口可能超出范围 ──
+        if ptr + self._sd.window_pts > self._sd.n_samples:
+            self._player.ack()
+            return
         try:
-            ptr = self._player.ptr
-            if ptr + self._sd.window_pts > self._sd.n_samples:
-                return
             self._grid.scroll(ptr, self._sd)
+            # 更新绝对时间戳
+            abs_sec = ptr / self._sd.s_freq
+            mins, sec = divmod(abs_sec, 60)
+            self._lbl_timestamp.setText(f"{int(mins):02d}:{sec:06.3f}")
         finally:
             self._player.ack()
 
@@ -464,16 +509,38 @@ class MainWindow(QtWidgets.QMainWindow):
     # ═══════════════════════════════════════════════════════════
 
     def _on_ch_scroll(self, val: int):
-        """通道滑动条回调。仅在 Row/Tile 模式生效。"""
+        """通道滑动条拖动中 — 30ms 短防抖，保证拖动时有视觉反馈但不卡。"""
         if not self._sd.ready:
             return
-        self._grid.set_offset(self._sd, val)
+        self._ch_timer.start()
+
+    def _on_ch_debounce(self):
+        """防抖回调 — 用滑动条当前值执行通道切换。"""
+        if not self._sd.ready:
+            return
+        self._grid.set_offset(self._sd, self._slider_ch.value())
+
+    def _on_ch_released(self):
+        """松手时立即执行通道切换，不等待防抖定时器。"""
+        self._ch_timer.stop()
+        if self._sd.ready:
+            self._grid.set_offset(self._sd, self._slider_ch.value())
+
+    def _ch_up(self):
+        """↑ 键 — 向上滚动一个通道。"""
+        if self._slider_ch.isEnabled():
+            v = max(0, self._slider_ch.value() - 1)
+            self._slider_ch.setValue(v)
+
+    def _ch_down(self):
+        """↓ 键 — 向下滚动一个通道。"""
+        if self._slider_ch.isEnabled():
+            v = min(self._slider_ch.maximum(),
+                    self._slider_ch.value() + 1)
+            self._slider_ch.setValue(v)
 
     def _on_win_slider(self, val: int):
-        """时窗滑动条: 0-1000 → WINDOW_SEC_MIN ~ WINDOW_SEC_MAX 秒。
-
-        改范围: 修改 config.py 的 WINDOW_SEC_MIN / MAX。
-        """
+        """时窗滑动条拖动中 — 只更新数值标签，保证手感丝滑。"""
         if not self._sd.ready:
             return
         frac = val / 1000.0
@@ -481,6 +548,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._sd.set_window(sec)
         self._lbl_win.setText(f"{sec * 1000:.0f}ms")
 
+    def _on_win_released(self):
+        """时窗滑动条松手 — 一次性执行耗时的 grid 重载。"""
+        if not self._sd.ready:
+            return
         self._grid.update_ranges(self._sd)
         self._player.configure(
             self._sd.s_freq, self._sd.n_samples, self._sd.window_pts)
@@ -488,10 +559,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_details()
 
     def _on_amp_slider(self, val: int):
-        """幅值滑动条: 0-1000 → AMP_SCALE_MIN ~ AMP_SCALE_MAX。
-
-        改范围: 修改 config.py 的 AMP_SCALE_MIN / MAX。
-        """
+        """幅值滑动条拖动中 — 只更新数值标签，保证手感丝滑。"""
         if not self._sd.ready:
             return
         frac = val / 1000.0
@@ -499,6 +567,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._sd.set_amp_scale(scale)
         self._lbl_amp.setText(f"{scale:.1f}×")
 
+    def _on_amp_released(self):
+        """幅值滑动条松手 — 一次性执行耗时的 grid 重载。"""
+        if not self._sd.ready:
+            return
         self._grid.reload_amp(self._sd)
         self._update_details()
 
@@ -537,7 +609,8 @@ class MainWindow(QtWidgets.QMainWindow):
         dw = DetailWindow(ch, self._sd, self._player, parent=self)
         dw.setAttribute(QtCore.Qt.WA_DeleteOnClose)       # 关闭时自动销毁
         dw.setWindowFlag(QtCore.Qt.Window, True)          # 独立窗口（非子窗口）
-        dw.move(self.x() + 30, self.y() + 30)             # 稍微偏移
+        dw.move(self.x() + DETAIL_OFFSET_X,
+                self.y() + DETAIL_OFFSET_Y)
         dw.show()
         self._details.add(dw)
 
@@ -551,9 +624,3 @@ class MainWindow(QtWidgets.QMainWindow):
                 except RuntimeError:
                     pass
 
-    # ═══════════════════════════════════════════════════════════
-    # 状态（状态栏已移除，保留空方法防止调用报错）
-    # ═══════════════════════════════════════════════════════════
-
-    def _update_status(self):
-        pass  # 状态栏已移除

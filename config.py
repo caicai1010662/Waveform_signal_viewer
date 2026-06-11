@@ -10,6 +10,22 @@ import pyqtgraph as pg
 
 
 # ═══════════════════════════════════════════════════════════════
+# 〇、启动参数 — 窗口大小、位置、状态
+# ═══════════════════════════════════════════════════════════════
+
+WIN_WIDTH  = 1920      # 窗口初始宽度（像素）
+WIN_HEIGHT = 1080      # 窗口初始高度（像素）
+WIN_X = -1             # 窗口 X 位置：-1=自动居中， 0=贴屏幕左边， 960=主屏右半边
+WIN_Y = -1             # 窗口 Y 位置：-1=自动居中， 0=贴屏幕顶端， 100=距顶 100px
+WIN_MAXIMIZED = False  # True = 启动后自动最大化，覆盖 WIN_WIDTH/HEIGHT
+WIN_TITLE = "SignalViewer"  # 窗口标题
+
+# Detail 弹出窗相对于主窗口的偏移（避免完全遮挡）
+DETAIL_OFFSET_X = 30
+DETAIL_OFFSET_Y = 30
+
+
+# ═══════════════════════════════════════════════════════════════
 # 一、显示参数 — 控制波形窗口和渲染
 # ═══════════════════════════════════════════════════════════════
 
@@ -68,7 +84,7 @@ SPEED_MUL_MAX  = 1.5    # 最快 1.5×
 
 
 # ═══════════════════════════════════════════════════════════════
-# 五、数据驱动参数 — 自动计算通道幅值和间距
+# 四、数据驱动参数 — 自动计算通道幅值和间距
 # ═══════════════════════════════════════════════════════════════
 
 # 通道幅值估算用的百分位。99.5 = 取绝对值最大的前 0.5% 作为峰值
@@ -90,27 +106,27 @@ COLOR_BG     = "#181818"  # 窗口底色（最外层背景）
 COLOR_CARD   = "#1E1E1E"  # 波形面板底色（比 BG 稍亮一点，形成层级感）
 COLOR_ORIG   = "#4FC1FF"  # 原始信号曲线颜色
 COLOR_RECON  = "#DCDCAA"  # 重建信号曲线颜色
-COLOR_GRID   = "#4A4A4A"  # 零基线 / 辅助参考线（提亮，在斑马纹上清晰可见）
+COLOR_GRID   = "#4A4A4A"  # Detail 窗坐标轴刻度线颜色（Compare/Browse 已删除零基线）
 COLOR_ACCENT = "#007ACC"  # 交互强调色（按钮选中、滑块手柄、hover 高亮）
 COLOR_TEXT   = "#FFFFFF"  # 所有文字的颜色
-COLOR_SEP    = "#3E3E42"  # 中轴分隔线（强化左右面板的切割感）
+COLOR_SEP    = "#474748"  # 中轴分隔线（强化左右面板的切割感）
 COLOR_SLIDER = "#464646"  # 滑动条轨道底色（比卡片稍亮，确保轨道可见）
 COLOR_HOVER  = "#2A2D2E"  # 鼠标悬停时的底色
-COLOR_ZEBRA  = "#222222"  # 斑马纹交替行底色（Row 模式每隔一个通道的浅色背景）
+COLOR_ZEBRA  = "#2A2A2A"  # 斑马纹交替行底色（Row 模式每隔一个通道的浅色背景)
 
 
-# ═══════════════════════════════════════════════════════════════
+# ════════════════════════════════════
 # 七、字体 — 全局统一字体和字号
-# ═══════════════════════════════════════════════════════════════
+# ════════════════════════════════════
 
 FONT_FAMILY = "Microsoft YaHei Mono"  # 主字体。等宽中英文字体
 FONT_SIZE   = 16               # 全局字号（窗口标题、标签、状态栏等）
-FONT_SIZE_SMALL = 16           # 小字号（按钮文字等）
+FONT_SIZE_SMALL = 16           # 小字号（按钮文字等)
 
 
-# ═══════════════════════════════════════════════════════════════
+# ════════════════════════════════════════
 # 八、Qt 样式表 (QSS) — 按钮 / 滑动条 / 滚动条 / 标签的外观
-#    语法类似 CSS。{COLOR_XXX} 会被上面第六节的配色自动填充
+#    语法类似 CSS。{COLOR_XXX} 会被上面第五节的配色自动填充
 # ═══════════════════════════════════════════════════════════════
 
 STYLESHEET = f"""
@@ -159,16 +175,16 @@ QPushButton:checked {{
 /* 滑轨（长条背景） */
 QSlider::groove:horizontal {{
     background: {COLOR_SLIDER};  /* 轨道颜色 */
-    height: 20px;                /* 轨道高度（粗细） */
-    border-radius: 10px;         /* 轨道圆角 */
+    height: 22px;                /* 轨道高度 — 大轨道好瞄准 */
+    border-radius: 11px;         /* 轨道圆角 */
 }}
 /* 滑块手柄（可拖动的那个小方块） */
 QSlider::handle:horizontal {{
     background: {COLOR_ACCENT};  /* 手柄颜色 = 主题蓝 */
-    width: 14px;                 /* 手柄宽度 */
-    height: 14px;                /* 手柄高度 */
-    margin: -4px 0;              /* 微调垂直居中 */
-    border-radius: 7px;          /* 手柄圆角 */
+    width: 22px;                 /* 手柄宽度 — 加大后拖动不费劲 */
+    height: 22px;                /* 手柄高度 */
+    margin: -2px 0;              /* 微调垂直居中 */
+    border-radius: 11px;         /* 手柄圆角 */
 }}
 /* 滑块悬停 */
 QSlider::handle:horizontal:hover {{
@@ -179,16 +195,16 @@ QSlider::handle:horizontal:hover {{
 /* 滑轨 */
 QSlider::groove:vertical {{
     background: {COLOR_SLIDER};  /* 轨道颜色 */
-    width: 13px;                 /* 轨道宽度 */
-    border-radius: 10px;         /* 轨道圆角 */
+    width: 22px;                 /* 轨道宽度 — 加粗后好瞄准 */
+    border-radius: 11px;         /* 轨道圆角 */
 }}
 /* 滑块手柄 */
 QSlider::handle:vertical {{
     background: {COLOR_ACCENT};  /* 手柄颜色 = 主题蓝 */
-    height: 35px;                /* 手柄高度（纵向长度） */
-    width: 15px;                 /* 手柄宽度 */
-    margin: 0 -4px;              /* 微调水平居中 */
-    border-radius: 5px;          /* 手柄圆角 */
+    height: 50px;                /* 手柄高度 — 抓取面积更大 */
+    width: 22px;                 /* 手柄宽度 */
+    margin: 0 -2px;              /* 微调水平居中 */
+    border-radius: 11px;         /* 手柄圆角 */
 }}
 /* 滑块悬停 */
 QSlider::handle:vertical:hover {{

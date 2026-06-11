@@ -130,18 +130,26 @@ def _load_mat_sync(path: str, report=None) -> tuple[np.ndarray, int, str]:
 
     # ── 步骤 1: 尝试 .raw 缓存 ────────────────────────────
     if _has_raw_cache(path):
-        _r("正在使用缓存...")
+        _r("正在校验缓存...")
         try:
-            # 仍需用 scipy 读一下元信息（shape + s_freq）
+            # 用 scipy 读元信息（shape + s_freq），验证缓存与源文件一致
             mat = sio.loadmat(path)
             keys = [k for k in mat if not k.startswith('__')]
             best_key = max(keys, key=lambda k: np.size(mat[k]))
             arr = mat[best_key]
             s_freq = _extract_s_freq_from_dict(mat)
             shape = arr.shape
-            del mat, arr  # 释放 scipy 加载的数据，用 memmap 替代
+            del mat, arr  # 释放 scipy 数据
+            # ── 文件大小校验：同名替换可能导致时间戳不变但内容变了 ──
+            raw_path = _raw_cache_path(path)
+            expected = shape[0] * shape[1] * 4  # float32
+            if os.path.getsize(raw_path) != expected:
+                _r("缓存校验失败（大小不匹配），删除缓存，重新加载...")
+                os.remove(raw_path)
+                raise ValueError("cache size mismatch")
+            _r("正在使用缓存...")
             data = _open_memmap(path, shape)
-            return data, s_freq, _raw_cache_path(path)
+            return data, s_freq, raw_path
         except (NotImplementedError, Exception):
             pass  # 缓存读取失败 → 回退到全量加载
 

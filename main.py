@@ -1,5 +1,5 @@
 """
-main.py — SignalViewer 程序入口
+1main.py — SignalViewer 程序入口
 
   这是整个程序的启动文件。双击或用 python main.py 运行。
   只做一件事：创建 Qt 应用程序 → 加载样式表 → 显示主窗口。
