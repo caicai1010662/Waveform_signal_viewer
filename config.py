@@ -121,7 +121,17 @@ COLOR_ZEBRA  = "#2A2A2A"  # 斑马纹交替行底色（Row 模式每隔一个通
 
 FONT_FAMILY = "Microsoft YaHei Mono"  # 主字体。等宽中英文字体
 FONT_SIZE   = 16               # 全局字号（窗口标题、标签、状态栏等）
-FONT_SIZE_SMALL = 16           # 小字号（按钮文字等)
+FONT_SIZE_SMALL = 16           # 小字号（按钮文字等）
+
+# Detail 窗口字号（独立于主窗，按需调整）
+DETAIL_FONT_TICK  = 15        # 坐标轴刻度数字
+DETAIL_FONT_LABEL = 15        # 坐标轴标题（µV / Time）、图例文字
+DETAIL_FONT_TITLE = 12        # Side-by-side 面板标题（Rawdata / Recdata）
+DETAIL_GRID_ALPHA = 0.9      # 网格虚线透明度
+DETAIL_LINE_WIDTH = 1.5       # Detail 窗波形线宽
+DETAIL_Y_PADDING  = 1.2       # Y 轴上下留白系数（改大=波形上下空余更多，改小=贴边）
+DETAIL_BTN_HEIGHT = 35        # 顶栏切换按钮高度（像素）
+DETAIL_BTN_FONT   = 19        # 顶栏切换按钮字号
 
 
 # ════════════════════════════════════════

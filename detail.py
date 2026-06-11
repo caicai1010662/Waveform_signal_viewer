@@ -14,7 +14,10 @@ import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtWidgets, QtGui
 
 from config import (COLOR_BG, COLOR_ORIG, COLOR_RECON, COLOR_GRID,
-                     COLOR_TEXT, COLOR_CARD, FONT_FAMILY)
+                     COLOR_TEXT, COLOR_CARD, FONT_FAMILY,
+                     DETAIL_FONT_TICK, DETAIL_FONT_LABEL, DETAIL_FONT_TITLE,
+                     DETAIL_GRID_ALPHA, DETAIL_LINE_WIDTH,
+                     DETAIL_BTN_HEIGHT, DETAIL_BTN_FONT)
 from data import SignalData
 from player import Player
 from utils import make_font
@@ -38,12 +41,17 @@ class DetailWindow(QtWidgets.QMainWindow):
         self._player = player             # 播放引擎
         self._overlay = True              # 当前模式（True=叠加, False=并排）
 
-        # 窗口标题: ChX — 幅值
-        y_lo, y_hi = sd.y_range_detail(ch)
-        amp_val = sd.ch_amp[ch] if sd.ch_amp is not None else 0.0
+        # ── Y 轴范围 — 分信号源计算，解决幅值差异导致的削顶 ──
+        # Overlay: 取两信号中较大的范围，确保双方完整可见
+        y_lo_overlay, y_hi_overlay = sd.y_range_overlay(ch)
+        # Side-by-side: 各自用自己的幅值
+        y_lo_orig, y_hi_orig = sd.y_range_detail(ch, 'orig')
+        y_lo_recon, y_hi_recon = sd.y_range_detail(ch, 'recon')
+
+        amp_orig = sd.ch_amp[ch] if sd.ch_amp is not None else 0.0
+        amp_recon = sd.ch_amp_recon[ch] if sd.ch_amp_recon is not None else 0.0
         self.setWindowTitle(
-            f"Ch{ch + 1}  —  Rawdata vs Recdata  |  "
-            f"Amplitude {amp_val:.1f} µV")
+            f"Ch{ch + 1}  —  Rawdata {amp_orig:.1f}µV  |  Recdata {amp_recon:.1f}µV")
         self.resize(1200, 420)
 
         # ── 构建 UI ──────────────────────────────────────
@@ -54,33 +62,33 @@ class DetailWindow(QtWidgets.QMainWindow):
         main_v.setContentsMargins(4, 4, 4, 4)
         main_v.setSpacing(4)
 
-        # 顶栏: 模式切换按钮 + 信息标签
+        # 顶栏: 模式切换按钮（紧凑，不抢波形空间）
         top = QtWidgets.QHBoxLayout()
-        top.setContentsMargins(4, 2, 4, 2)
+        top.setContentsMargins(2, 0, 2, 0)
 
-        self._btn_toggle = QtWidgets.QPushButton("Overlay Mode")
+        self._btn_toggle = QtWidgets.QPushButton("Overlay")
         self._btn_toggle.setCheckable(True)
         self._btn_toggle.setChecked(True)
+        self._btn_toggle.setFixedHeight(DETAIL_BTN_HEIGHT)
+        self._btn_toggle.setStyleSheet(
+            f"font-size: {DETAIL_BTN_FONT}px; padding: 2px 10px; "
+            "font-weight: bold;")
         self._btn_toggle.clicked.connect(self._toggle_mode)
 
-        self._lbl_info = QtWidgets.QLabel()
-        self._lbl_info.setStyleSheet(
-            f"color: {COLOR_TEXT}; font-family: '{FONT_FAMILY}'; "
-            f"font-size: 10px; font-weight: bold;")
-
+        top.addStretch(1)
         top.addWidget(self._btn_toggle)
         top.addStretch(1)
-        top.addWidget(self._lbl_info)
         main_v.addLayout(top)
 
         # 波形区域: QStackedLayout 叠加两个面板
         self._stack = QtWidgets.QStackedLayout()
         main_v.addLayout(self._stack, 1)
 
-        self._overlay_panel = self._make_overlay_panel(y_lo, y_hi)
+        self._overlay_panel = self._make_overlay_panel(y_lo_overlay, y_hi_overlay)
         self._stack.addWidget(self._overlay_panel)
 
-        self._side_panel = self._make_side_panel(y_lo, y_hi)
+        self._side_panel = self._make_side_panel(y_lo_orig, y_hi_orig,
+                                                 y_lo_recon, y_hi_recon)
         self._stack.addWidget(self._side_panel)
 
         # 连接到播放器，立即显示第一帧
@@ -92,47 +100,60 @@ class DetailWindow(QtWidgets.QMainWindow):
     # Overlay 面板 — 两条曲线在同一轴
     # ═════════════════════════════════════════════════════
 
+    @staticmethod
+    def _force_axis_font(ax, tick_font: QtGui.QFont, label_font: QtGui.QFont):
+        """暴力设置坐标轴所有文字字体。
+
+        pyqtgraph 的 setTickFont() 在某些版本/场景下不生效。
+        此方法直接遍历轴的子节点，对所有 QGraphicsTextItem 设字体，
+        确保刻度数字、轴标题一定使用正确的字体和字号。
+        """
+        ax.setTickFont(tick_font)
+        if hasattr(ax, 'label') and ax.label is not None:
+            ax.label.setFont(label_font)
+        # 遍历子节点补刀 — 覆盖 pyqtgraph 内部可能遗漏的文字
+        for child in ax.childItems():
+            if isinstance(child, QtWidgets.QGraphicsTextItem):
+                child.setFont(tick_font)
+
     def _make_overlay_panel(self, y_lo: float, y_hi: float) -> pg.GraphicsLayoutWidget:
         """构建叠加模式面板: 一个 PlotItem + 两条曲线 + 图例。"""
         glw = pg.GraphicsLayoutWidget()
         glw.setBackground(COLOR_BG)
         p = glw.addPlot()
 
-        font_tick = make_font(9)           # 刻度字号
-        font_label = make_font(10)         # 轴标签、图例字号
+        font_tick = make_font(DETAIL_FONT_TICK)
+        font_label = make_font(DETAIL_FONT_LABEL)
 
         # 坐标轴标签
         p.setLabel('left', 'µV', color=COLOR_TEXT)
         p.setLabel('bottom', 'Time', units='s', color=COLOR_TEXT)
         for ax_name in ('left', 'bottom'):
             ax = p.getAxis(ax_name)
-            ax.setPen(COLOR_GRID)
+            ax.setPen(pg.mkPen(color=COLOR_GRID, width=1, style=QtCore.Qt.DashLine))
             ax.setTextPen(COLOR_TEXT)
-            ax.setTickFont(font_tick)
-            # 显式设置轴标签字体（pyqtgraph 内部 TextItem，不走 QSS）
-            if hasattr(ax, 'label') and ax.label is not None:
-                ax.label.setFont(font_label)
+            self._force_axis_font(ax, font_tick, font_label)
 
-        p.showGrid(x=True, y=True, alpha=0.06)  # 半透明网格
+        p.showGrid(x=True, y=True, alpha=DETAIL_GRID_ALPHA)
         p.setYRange(y_lo, y_hi, padding=0)
         p.setXRange(0, self._sd.window_sec, padding=0)
         p.hideButtons()
         p.setMouseEnabled(x=False, y=False)
         p.setMenuEnabled(False)
 
-        # 图例（右上角）— 显式设置字体
         legend = p.addLegend(offset=(1, 1))
         legend.setFont(font_label)
+        legend.mouseDragEvent = lambda ev: None  # 锁定图例不可拖拽
 
-        # Rawdata（白/蓝）+ Recdata（黄）
         self._overlay_orig = p.plot(
-            pen=pg.mkPen(color=COLOR_ORIG, width=1.2), name="Rawdata")
+            pen=pg.mkPen(color=COLOR_ORIG, width=DETAIL_LINE_WIDTH), name="Rawdata")
         self._overlay_recon = p.plot(
-            pen=pg.mkPen(color=COLOR_RECON, width=1.2), name="Recdata")
+            pen=pg.mkPen(color=COLOR_RECON, width=DETAIL_LINE_WIDTH), name="Recdata")
 
-        # 开启 pyqtgraph 自动降采样（渲染时根据屏幕像素自动压缩）
-        self._overlay_orig.setDownsampling(auto=True, method='peak')
-        self._overlay_recon.setDownsampling(auto=True, method='peak')
+        # 关闭自动降采样 — Detail 窗口数据量小（~1500 点），
+        # method='peak' 会把高频噪声涂抹成实心色块，反而失真
+        self._overlay_orig.setDownsampling(auto=False)
+        self._overlay_recon.setDownsampling(auto=False)
         self._p_overlay = p
 
         return glw
@@ -141,47 +162,46 @@ class DetailWindow(QtWidgets.QMainWindow):
     # Side-by-side 面板 — 左右并排两个独立 PlotItem
     # ═════════════════════════════════════════════════════
 
-    def _make_side_panel(self, y_lo: float, y_hi: float) -> QtWidgets.QWidget:
-        """构建并排模式面板: 两个 GraphicsLayoutWidget 左右排列。"""
+    def _make_side_panel(self,
+                         y_lo_orig: float, y_hi_orig: float,
+                         y_lo_recon: float, y_hi_recon: float) -> QtWidgets.QWidget:
+        """构建并排模式面板: 左侧 Rawdata + 右侧 Recdata，各自独立 Y 范围。"""
         w = QtWidgets.QWidget()
         layout = QtWidgets.QHBoxLayout(w)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        font_tick = make_font(9)           # 刻度字号
-        font_label = make_font(10)         # 轴标签字号
-        font_title = make_font(11)         # 面板标题字号
+        font_tick = make_font(DETAIL_FONT_TICK)
+        font_label = make_font(DETAIL_FONT_LABEL)
+        font_title = make_font(DETAIL_FONT_TITLE)
 
-        for clr, bg, label_text in [
-            (COLOR_ORIG, COLOR_BG, "Rawdata"),        # 左: Rawdata
-            (COLOR_RECON, COLOR_BG, "Recdata")        # 右: Recdata
+        for clr, bg, label_text, y_lo, y_hi in [
+            (COLOR_ORIG, COLOR_BG, "Rawdata", y_lo_orig, y_hi_orig),
+            (COLOR_RECON, COLOR_BG, "Recdata", y_lo_recon, y_hi_recon),
         ]:
             glw = pg.GraphicsLayoutWidget()
             glw.setBackground(bg)
             p = glw.addPlot()
             p.setLabel('left', 'µV', color=COLOR_TEXT)
             p.setLabel('bottom', 'Time', units='s', color=COLOR_TEXT)
-            # 标题 — 用 QFont 替代字符串 size
             p.setTitle(label_text, color=COLOR_TEXT)
             if hasattr(p, 'titleLabel') and p.titleLabel is not None:
                 p.titleLabel.setFont(font_title)
             for ax_name in ('left', 'bottom'):
                 ax = p.getAxis(ax_name)
-                ax.setPen(COLOR_GRID)
+                ax.setPen(pg.mkPen(color=COLOR_GRID, width=1, style=QtCore.Qt.DashLine))
                 ax.setTextPen(COLOR_TEXT)
-                ax.setTickFont(font_tick)
-                # 显式设置轴标签字体
-                if hasattr(ax, 'label') and ax.label is not None:
-                    ax.label.setFont(font_label)
-            p.showGrid(x=True, y=True, alpha=0.06)
+                self._force_axis_font(ax, font_tick, font_label)
+            p.showGrid(x=True, y=True, alpha=DETAIL_GRID_ALPHA)
+            # 各自独立 Y 范围 — Rawdata 和 Recdata 用各自的 ch_amp
             p.setYRange(y_lo, y_hi, padding=0)
             p.setXRange(0, self._sd.window_sec, padding=0)
             p.hideButtons()
             p.setMouseEnabled(x=False, y=False)
             p.setMenuEnabled(False)
 
-            curve = p.plot(pen=pg.mkPen(color=clr, width=1.0))
-            curve.setDownsampling(auto=True, method='peak')
+            curve = p.plot(pen=pg.mkPen(color=clr, width=DETAIL_LINE_WIDTH))
+            curve.setDownsampling(auto=False)
             layout.addWidget(glw)
 
             if clr == COLOR_ORIG:
@@ -198,12 +218,12 @@ class DetailWindow(QtWidgets.QMainWindow):
     # ═════════════════════════════════════════════════════
 
     def _toggle_mode(self):
-        """切换 Overlay ↔ Side-by-side 显示模式。"""
-        self._overlay = self._btn_toggle.isChecked()
-        self._btn_toggle.setText("Overlay Mode" if self._overlay
-                                 else "Side-by-Side")
+        """切换 Overlay ↔ Side by Side 显示模式。"""
+        self._overlay = not self._overlay
+        self._btn_toggle.setChecked(True)  # 始终 checked，表示"当前选中模式"
+        self._btn_toggle.setText("Overlay" if self._overlay else "Side by Side")
         self._stack.setCurrentIndex(0 if self._overlay else 1)
-        self._tick()  # 立即刷新显示
+        self._tick()
 
     # ═════════════════════════════════════════════════════
     # 范围更新 — 主窗口滑动条改变时调用
@@ -212,22 +232,26 @@ class DetailWindow(QtWidgets.QMainWindow):
     def update_ranges(self):
         """时窗或幅值变化后，同步更新 X/Y 轴范围和窗口标题。"""
         sd = self._sd
-        y_lo, y_hi = sd.y_range_detail(self._ch)
         w = sd.window_sec
 
+        # Overlay: 取两信号较大的范围
+        y_lo_overlay, y_hi_overlay = sd.y_range_overlay(self._ch)
         self._p_overlay.setXRange(0, w, padding=0)
-        self._p_overlay.setYRange(y_lo, y_hi, padding=0)
+        self._p_overlay.setYRange(y_lo_overlay, y_hi_overlay, padding=0)
 
+        # Side-by-side: 各自用自己的幅值
         if hasattr(self, '_p_side_left'):
+            y_lo_orig, y_hi_orig = sd.y_range_detail(self._ch, 'orig')
+            y_lo_recon, y_hi_recon = sd.y_range_detail(self._ch, 'recon')
             self._p_side_left.setXRange(0, w, padding=0)
-            self._p_side_left.setYRange(y_lo, y_hi, padding=0)
+            self._p_side_left.setYRange(y_lo_orig, y_hi_orig, padding=0)
             self._p_side_right.setXRange(0, w, padding=0)
-            self._p_side_right.setYRange(y_lo, y_hi, padding=0)
+            self._p_side_right.setYRange(y_lo_recon, y_hi_recon, padding=0)
 
-        amp_val = sd.ch_amp[self._ch] if sd.ch_amp is not None else 0.0
+        amp_orig = sd.ch_amp[self._ch] if sd.ch_amp is not None else 0.0
+        amp_recon = sd.ch_amp_recon[self._ch] if sd.ch_amp_recon is not None else 0.0
         self.setWindowTitle(
-            f"Ch{self._ch + 1}  —  Rawdata vs Recdata  |  "
-            f"Amplitude {amp_val:.1f} µV")
+            f"Ch{self._ch + 1}  —  Rawdata {amp_orig:.1f}µV  |  Recdata {amp_recon:.1f}µV")
 
     # ═════════════════════════════════════════════════════
     # 帧更新 — 播放时每秒触发 TARGET_FPS 次
@@ -263,10 +287,6 @@ class DetailWindow(QtWidgets.QMainWindow):
                 self._side_orig.setData(self._t_buf, orig_slice)
                 self._side_recon.setData(self._t_buf, recon_slice)
 
-        # 底部信息栏
-        self._lbl_info.setText(
-            f"ptr={ptr}  |  window={sd.window_sec*1000:.0f}ms  |  "
-            f"amp={sd.amp_scale:.1f}×  |  speed={self._player.speed_mul:.1f}×")
 
     # ═════════════════════════════════════════════════════
     # 关闭

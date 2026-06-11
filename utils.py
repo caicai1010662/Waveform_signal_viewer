@@ -20,20 +20,22 @@ from config import FONT_FAMILY, FONT_SIZE, FONT_SIZE_SMALL
 # ═══════════════════════════════════════════════════════════════
 
 @lru_cache(maxsize=32)
-def make_font(size: int = FONT_SIZE, bold: bool = True) -> QtGui.QFont:
-    """创建字体对象。默认加粗。
+def make_font(size: int = FONT_SIZE, bold: bool = True,
+              family: str = FONT_FAMILY) -> QtGui.QFont:
+    """创建字体对象。默认加粗，使用 Microsoft YaHei Mono。
 
     Args:
-        size: 字号。默认从 config.FONT_SIZE 读取（16px）
-        bold: True=加粗（默认）, False=正常
+        size:   字号。默认从 config.FONT_SIZE 读取（16px）
+        bold:   True=加粗（默认）, False=正常
+        family: 字体名。默认 FONT_FAMILY。显式纳入缓存键，
+                防止更换字体后缓存仍返回旧字体。
 
     用法:
-        font = make_font(12)         # 12px 加粗
-        font = make_font(14, False)  # 14px 正常
-
-    缓存: 同样参数只创建一次，后续调用直接返回缓存对象。
+        font = make_font(12)                     # 12px 加粗
+        font = make_font(14, False)              # 14px 正常
+        font = make_font(10, family="Consolas")  # 指定其他字体
     """
-    font = QtGui.QFont(FONT_FAMILY, size)
+    font = QtGui.QFont(family, size)
     font.setBold(bold)
     return font
 

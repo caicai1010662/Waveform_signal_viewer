@@ -25,7 +25,7 @@ import h5py
 from pyqtgraph.Qt import QtCore
 
 from config import WINDOW_SEC, Y_PERCENTILE, WINDOW_SEC_MIN, WINDOW_SEC_MAX, \
-    AMP_SCALE_MIN, AMP_SCALE_MAX
+    AMP_SCALE_MIN, AMP_SCALE_MAX, DETAIL_Y_PADDING
 
 warnings.filterwarnings("ignore")
 
@@ -293,8 +293,9 @@ class SignalData:
     amp_scale: float = 1.0               # 幅值缩放倍率，通过 Amp 滑动条调整
 
     # ── 数据计算参数（compute_params() 后填充）─────────
-    ch_amp: Optional[np.ndarray] = None  # (n_chan,) 每通道幅值 (µV)
-    ch_amp_computed: bool = False        # ch_amp 是否已计算
+    ch_amp: Optional[np.ndarray] = None       # (n_chan,) Rawdata 每通道幅值 (µV)
+    ch_amp_recon: Optional[np.ndarray] = None # (n_chan,) Recdata 每通道幅值 (µV)
+    ch_amp_computed: bool = False             # ch_amp 是否已计算
 
     # ── 状态属性 ────────────────────────────────────────
 
@@ -316,22 +317,26 @@ class SignalData:
     # ── 参数计算 ────────────────────────────────────────
 
     def compute_params(self):
-        """从原始信号前 5 秒数据计算每通道幅值。
+        """从原始 + 重建前 5 秒数据分别计算每通道幅值。
 
-        算法: 每通道取 |信号| 的 Y_PERCENTILE 百分位作为幅值。
-              例如 99.5 分位 = 忽略最极端的 0.5% 尖峰。
-              结果 × 1.2 作为 Detail 视图的 Y 轴范围。
+        同时计算 Rawdata 和 Recdata 的 ch_amp，解决重建信号幅值
+        与原始信号差异大时 Detail 窗 Y 轴被一方锁死导致另一方削顶的 bug。
 
+        算法: 每通道取 |信号| 的 Y_PERCENTILE 分位作为幅值。
         在加载重建信号后由 app.py 调用一次。
         """
         if self.orig is None:
             return
-        # 只取前 5 秒计算幅值（节省计算量，且前 5 秒有代表性）
         sample_len = min(self.n_samples, self.s_freq * 5)
-        sample = self.orig[:, :sample_len]
-        # percentile(|通道|, 99.5) + 下限 1.0（防止幅值为 0 导致除零）
+        # Rawdata 幅值
+        sample_orig = self.orig[:, :sample_len]
         self.ch_amp = np.maximum(
-            np.percentile(np.abs(sample), Y_PERCENTILE, axis=1), 1.0)
+            np.percentile(np.abs(sample_orig), Y_PERCENTILE, axis=1), 1.0)
+        # Recdata 幅值（重建信号可能有完全不同的量级）
+        if self.recon is not None:
+            sample_recon = self.recon[:, :sample_len]
+            self.ch_amp_recon = np.maximum(
+                np.percentile(np.abs(sample_recon), Y_PERCENTILE, axis=1), 1.0)
         self.window_pts = int(self.window_sec * self.s_freq)
         self.ch_amp_computed = True
 
@@ -348,16 +353,36 @@ class SignalData:
 
     # ── Y 轴范围计算 ────────────────────────────────────
 
-    def y_range_detail(self, ch: int) -> tuple[float, float]:
+    def y_range_detail(self, ch: int, source: str = 'orig') -> tuple[float, float]:
         """单个通道 Detail 视图的 Y 轴范围: ±(幅值 × 1.2 × 缩放)。
+
+        Args:
+            ch:     通道索引
+            source: 'orig'（Rawdata 幅值）或 'recon'（Recdata 幅值）
 
         Returns:
             (y_min, y_max)，例如 (-50.0, 50.0)
         """
-        if self.ch_amp is None or ch >= len(self.ch_amp):
-            return (-100.0, 100.0)  # 未计算时的默认安全范围
-        amp = float(self.ch_amp[ch]) * 1.2 * self.amp_scale
+        if source == 'recon' and self.ch_amp_recon is not None:
+            amp_arr = self.ch_amp_recon
+        else:
+            amp_arr = self.ch_amp
+        if amp_arr is None or ch >= len(amp_arr):
+            return (-100.0, 100.0)
+        amp = float(amp_arr[ch]) * DETAIL_Y_PADDING * self.amp_scale
         return (-amp, amp)
+
+    def y_range_overlay(self, ch: int) -> tuple[float, float]:
+        """Overlay 模式的 Y 轴范围: 取两信号中较大的幅值。
+
+        确保 Rawdata 和 Recdata 两条曲线都能完整显示，不会因为
+        一方幅值远大于另一方而导致削顶。
+        """
+        y_lo_orig, y_hi_orig = self.y_range_detail(ch, 'orig')
+        y_lo_recon, y_hi_recon = self.y_range_detail(ch, 'recon')
+        y_lo = min(y_lo_orig, y_lo_recon)
+        y_hi = max(y_hi_orig, y_hi_recon)
+        return (y_lo, y_hi)
 
     def y_offset(self, ch: int) -> float:
         """返回通道 ch 在 Row 模式下的 Y 轴中心偏移量。
