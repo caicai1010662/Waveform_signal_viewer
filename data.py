@@ -7,10 +7,7 @@ data.py — 数据加载 + SignalData 容器
     3. 异步加载（QThread），不阻塞 UI
     4. SignalData 容器：存储原始/重建数据，自动计算每通道幅值、Y 偏移
 
-  调参入口:
-    config.WINDOW_SEC  — 默认时间窗口（影响 window_pts 计算）
-    config.Y_PERCENTILE — 通道幅值百分位（影响 ch_amp）
-    config.SPACING_FACTOR — 通道间距系数（影响 Y 堆叠偏移）
+  调参入口: 本模块顶部的常量，改完保存 → 重启即可生效。
 """
 
 import os
@@ -24,8 +21,27 @@ import h5py
 
 from pyqtgraph.Qt import QtCore
 
-from config import WINDOW_SEC, Y_PERCENTILE, WINDOW_SEC_MIN, WINDOW_SEC_MAX, \
-    AMP_SCALE_MIN, AMP_SCALE_MAX, DETAIL_Y_PADDING
+
+# ═══════════════════════════════════════════════════════════════
+# 模块参数 — 调这里，不用去 config.py
+# ═══════════════════════════════════════════════════════════════
+
+# 默认时间窗口（秒）。0.05 = 屏幕上显示 50ms 的数据
+WINDOW_SEC = 0.05
+
+# 时间窗口滑动条范围（秒）
+WINDOW_SEC_MIN = 0.05   # 最小 50ms
+WINDOW_SEC_MAX = 0.10   # 最大 100ms
+
+# 幅值缩放滑动条范围。1.0 = 原始幅值
+AMP_SCALE_MIN = 1.0      # 最小 1.0×
+AMP_SCALE_MAX = 3.0      # 最大 3.0×
+
+# 通道幅值估算用的百分位。99.9 = 取绝对值最大的前 0.5% 作为峰值
+Y_PERCENTILE = 99.9
+
+# 通道间距系数。实际间距 = 通道幅值 × SPACING_FACTOR × amp_scale
+SPACING_FACTOR = 3
 
 warnings.filterwarnings("ignore")
 
@@ -353,12 +369,14 @@ class SignalData:
 
     # ── Y 轴范围计算 ────────────────────────────────────
 
-    def y_range_detail(self, ch: int, source: str = 'orig') -> tuple[float, float]:
-        """单个通道 Detail 视图的 Y 轴范围: ±(幅值 × 1.2 × 缩放)。
+    def y_range_detail(self, ch: int, source: str = 'orig',
+                        y_padding: float = 1.0) -> tuple[float, float]:
+        """单个通道 Detail 视图的 Y 轴范围: ±(幅值 × y_padding × 缩放)。
 
         Args:
-            ch:     通道索引
-            source: 'orig'（Rawdata 幅值）或 'recon'（Recdata 幅值）
+            ch:        通道索引
+            source:    'orig'（Rawdata 幅值）或 'recon'（Recdata 幅值）
+            y_padding: Y 轴上下留白系数（detail.py 传入 DETAIL_Y_PADDING）
 
         Returns:
             (y_min, y_max)，例如 (-50.0, 50.0)
@@ -369,17 +387,17 @@ class SignalData:
             amp_arr = self.ch_amp
         if amp_arr is None or ch >= len(amp_arr):
             return (-100.0, 100.0)
-        amp = float(amp_arr[ch]) * DETAIL_Y_PADDING * self.amp_scale
+        amp = float(amp_arr[ch]) * y_padding * self.amp_scale
         return (-amp, amp)
 
-    def y_range_overlay(self, ch: int) -> tuple[float, float]:
+    def y_range_overlay(self, ch: int, y_padding: float = 1.0) -> tuple[float, float]:
         """Overlay 模式的 Y 轴范围: 取两信号中较大的幅值。
 
         确保 Rawdata 和 Recdata 两条曲线都能完整显示，不会因为
         一方幅值远大于另一方而导致削顶。
         """
-        y_lo_orig, y_hi_orig = self.y_range_detail(ch, 'orig')
-        y_lo_recon, y_hi_recon = self.y_range_detail(ch, 'recon')
+        y_lo_orig, y_hi_orig = self.y_range_detail(ch, 'orig', y_padding)
+        y_lo_recon, y_hi_recon = self.y_range_detail(ch, 'recon', y_padding)
         y_lo = min(y_lo_orig, y_lo_recon)
         y_hi = max(y_hi_orig, y_hi_recon)
         return (y_lo, y_hi)
@@ -392,7 +410,6 @@ class SignalData:
         """
         if self.ch_amp is None:
             return float(ch) * 100.0
-        from config import SPACING_FACTOR
         heights = self.ch_amp * SPACING_FACTOR * self.amp_scale
         cum = 0.0
         for i in range(self.n_chan - 1, ch, -1):
@@ -407,7 +424,6 @@ class SignalData:
         """
         if self.ch_amp is None:
             return np.zeros(self.n_chan, dtype=np.float32)
-        from config import SPACING_FACTOR
         heights = self.ch_amp * SPACING_FACTOR * self.amp_scale
         offsets = np.zeros(self.n_chan, dtype=np.float32)
         cum = 0.0
@@ -425,5 +441,4 @@ class SignalData:
         """
         if self.ch_amp is None:
             return self.n_chan * 100.0
-        from config import SPACING_FACTOR
         return float(np.sum(self.ch_amp * SPACING_FACTOR * self.amp_scale))

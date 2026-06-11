@@ -6,7 +6,7 @@ detail.py — 单通道详情弹出窗口
                  可切换 Side-by-side 模式（左右并排）。
                  播放时每帧 setData，连接 Player.frame_ready。
 
-  调参入口: 无。YT范围从 SignalData.y_range_detail() 获取。
+  调参入口: 本模块顶部的常量，改完保存 → 重启即可生效。
 """
 
 import numpy as np
@@ -14,13 +14,34 @@ import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtWidgets, QtGui
 
 from config import (COLOR_BG, COLOR_ORIG, COLOR_RECON, COLOR_GRID,
-                     COLOR_TEXT, COLOR_CARD, FONT_FAMILY,
-                     DETAIL_FONT_TICK, DETAIL_FONT_LABEL, DETAIL_FONT_TITLE,
-                     DETAIL_GRID_ALPHA, DETAIL_LINE_WIDTH,
-                     DETAIL_BTN_HEIGHT, DETAIL_BTN_FONT)
+                     COLOR_TEXT, COLOR_CARD, FONT_FAMILY)
 from data import SignalData
 from player import Player
 from utils import make_font
+
+
+# ═══════════════════════════════════════════════════════════════
+# 模块参数 — 调这里，不用去 config.py
+# ═══════════════════════════════════════════════════════════════
+
+# 字体字号
+DETAIL_FONT_TICK  = 15        # 坐标轴刻度数字
+DETAIL_FONT_LABEL = 50        # 坐标轴标题（µV / Time）、图例文字
+DETAIL_FONT_TITLE = 12        # Side-by-side 面板标题（Rawdata / Recdata）
+
+# 视觉
+DETAIL_GRID_ALPHA = 0.9       # 网格虚线透明度
+DETAIL_LINE_WIDTH = 1.5       # 波形线宽（像素）
+DETAIL_Y_PADDING  = 1.0       # Y 轴上下留白系数（改大=波形上下空余更多）
+DETAIL_X_PADDING  = 0.02      # X 轴左右呼吸空间（比例，0 = 贴边）
+
+# 按钮
+DETAIL_BTN_HEIGHT = 35        # 顶栏切换按钮高度（像素）
+DETAIL_BTN_FONT   = 19        # 顶栏切换按钮字号
+
+# 窗口偏移（相对于主窗口）
+DETAIL_OFFSET_X = 30
+DETAIL_OFFSET_Y = 30
 
 
 class DetailWindow(QtWidgets.QMainWindow):
@@ -43,10 +64,10 @@ class DetailWindow(QtWidgets.QMainWindow):
 
         # ── Y 轴范围 — 分信号源计算，解决幅值差异导致的削顶 ──
         # Overlay: 取两信号中较大的范围，确保双方完整可见
-        y_lo_overlay, y_hi_overlay = sd.y_range_overlay(ch)
+        y_lo_overlay, y_hi_overlay = sd.y_range_overlay(ch, DETAIL_Y_PADDING)
         # Side-by-side: 各自用自己的幅值
-        y_lo_orig, y_hi_orig = sd.y_range_detail(ch, 'orig')
-        y_lo_recon, y_hi_recon = sd.y_range_detail(ch, 'recon')
+        y_lo_orig, y_hi_orig = sd.y_range_detail(ch, 'orig', DETAIL_Y_PADDING)
+        y_lo_recon, y_hi_recon = sd.y_range_detail(ch, 'recon', DETAIL_Y_PADDING)
 
         amp_orig = sd.ch_amp[ch] if sd.ch_amp is not None else 0.0
         amp_recon = sd.ch_amp_recon[ch] if sd.ch_amp_recon is not None else 0.0
@@ -59,7 +80,7 @@ class DetailWindow(QtWidgets.QMainWindow):
         self.setCentralWidget(cw)
 
         main_v = QtWidgets.QVBoxLayout(cw)
-        main_v.setContentsMargins(4, 4, 4, 4)
+        main_v.setContentsMargins(4, 25, 4, 15)
         main_v.setSpacing(4)
 
         # 顶栏: 模式切换按钮（紧凑，不抢波形空间）
@@ -101,20 +122,38 @@ class DetailWindow(QtWidgets.QMainWindow):
     # ═════════════════════════════════════════════════════
 
     @staticmethod
-    def _force_axis_font(ax, tick_font: QtGui.QFont, label_font: QtGui.QFont):
-        """暴力设置坐标轴所有文字字体。
+    def _force_axis_font(ax, tick_font: QtGui.QFont):
+        """暴力设置坐标轴刻度字体。
 
-        pyqtgraph 的 setTickFont() 在某些版本/场景下不生效。
-        此方法直接遍历轴的子节点，对所有 QGraphicsTextItem 设字体，
-        确保刻度数字、轴标题一定使用正确的字体和字号。
+        pyqtgraph 的 setTickFont() 在某些版本/场景下不生效，
+        此方法遍历轴的子 QGraphicsTextItem 直接设字体兜底。
+        轴标题（LabelItem）走 HTML 渲染，由 _setup_axes() 通过
+        p.setLabel() 的 size/family/bold 参数设置，不在这里处理。
         """
         ax.setTickFont(tick_font)
-        if hasattr(ax, 'label') and ax.label is not None:
-            ax.label.setFont(label_font)
-        # 遍历子节点补刀 — 覆盖 pyqtgraph 内部可能遗漏的文字
         for child in ax.childItems():
             if isinstance(child, QtWidgets.QGraphicsTextItem):
                 child.setFont(tick_font)
+
+    def _setup_axes(self, p: pg.PlotItem):
+        """统一配置坐标轴样式：标题字体、刻度字体、网格、禁用交互。"""
+        font_tick = make_font(DETAIL_FONT_TICK)
+        label_style = f'{DETAIL_FONT_LABEL}pt'
+
+        p.setLabel('left', 'µV', color=COLOR_TEXT,
+                   size=label_style, family=FONT_FAMILY, bold=True)
+        p.setLabel('bottom', 'Time', units='s', color=COLOR_TEXT,
+                   size=label_style, family=FONT_FAMILY, bold=True)
+        for ax_name in ('left', 'bottom'):
+            ax = p.getAxis(ax_name)
+            ax.setPen(pg.mkPen(color=COLOR_GRID, width=1))
+            ax.setTextPen(COLOR_TEXT)
+            self._force_axis_font(ax, font_tick)
+
+        p.showGrid(x=True, y=True, alpha=DETAIL_GRID_ALPHA)
+        p.hideButtons()
+        p.setMouseEnabled(x=False, y=False)
+        p.setMenuEnabled(False)
 
     def _make_overlay_panel(self, y_lo: float, y_hi: float) -> pg.GraphicsLayoutWidget:
         """构建叠加模式面板: 一个 PlotItem + 两条曲线 + 图例。"""
@@ -122,28 +161,15 @@ class DetailWindow(QtWidgets.QMainWindow):
         glw.setBackground(COLOR_BG)
         p = glw.addPlot()
 
-        font_tick = make_font(DETAIL_FONT_TICK)
-        font_label = make_font(DETAIL_FONT_LABEL)
-
-        # 坐标轴标签
-        p.setLabel('left', 'µV', color=COLOR_TEXT)
-        p.setLabel('bottom', 'Time', units='s', color=COLOR_TEXT)
-        for ax_name in ('left', 'bottom'):
-            ax = p.getAxis(ax_name)
-            ax.setPen(pg.mkPen(color=COLOR_GRID, width=1, style=QtCore.Qt.DashLine))
-            ax.setTextPen(COLOR_TEXT)
-            self._force_axis_font(ax, font_tick, font_label)
-
-        p.showGrid(x=True, y=True, alpha=DETAIL_GRID_ALPHA)
+        self._setup_axes(p)
         p.setYRange(y_lo, y_hi, padding=0)
-        p.setXRange(0, self._sd.window_sec, padding=0)
-        p.hideButtons()
-        p.setMouseEnabled(x=False, y=False)
-        p.setMenuEnabled(False)
+        p.setXRange(0, self._sd.window_sec, padding=DETAIL_X_PADDING)
 
         legend = p.addLegend(offset=(1, 1))
-        legend.setFont(font_label)
         legend.mouseDragEvent = lambda ev: None  # 锁定图例不可拖拽
+        font_size_str = f'{DETAIL_FONT_LABEL}pt'
+        for _, label in legend.items:
+            label.setText(label.text, family=FONT_FAMILY, size=font_size_str, bold=True)
 
         self._overlay_orig = p.plot(
             pen=pg.mkPen(color=COLOR_ORIG, width=DETAIL_LINE_WIDTH), name="Rawdata")
@@ -171,8 +197,6 @@ class DetailWindow(QtWidgets.QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        font_tick = make_font(DETAIL_FONT_TICK)
-        font_label = make_font(DETAIL_FONT_LABEL)
         font_title = make_font(DETAIL_FONT_TITLE)
 
         for clr, bg, label_text, y_lo, y_hi in [
@@ -182,23 +206,14 @@ class DetailWindow(QtWidgets.QMainWindow):
             glw = pg.GraphicsLayoutWidget()
             glw.setBackground(bg)
             p = glw.addPlot()
-            p.setLabel('left', 'µV', color=COLOR_TEXT)
-            p.setLabel('bottom', 'Time', units='s', color=COLOR_TEXT)
             p.setTitle(label_text, color=COLOR_TEXT)
             if hasattr(p, 'titleLabel') and p.titleLabel is not None:
                 p.titleLabel.setFont(font_title)
-            for ax_name in ('left', 'bottom'):
-                ax = p.getAxis(ax_name)
-                ax.setPen(pg.mkPen(color=COLOR_GRID, width=1, style=QtCore.Qt.DashLine))
-                ax.setTextPen(COLOR_TEXT)
-                self._force_axis_font(ax, font_tick, font_label)
-            p.showGrid(x=True, y=True, alpha=DETAIL_GRID_ALPHA)
+
+            self._setup_axes(p)
             # 各自独立 Y 范围 — Rawdata 和 Recdata 用各自的 ch_amp
             p.setYRange(y_lo, y_hi, padding=0)
-            p.setXRange(0, self._sd.window_sec, padding=0)
-            p.hideButtons()
-            p.setMouseEnabled(x=False, y=False)
-            p.setMenuEnabled(False)
+            p.setXRange(0, self._sd.window_sec, padding=DETAIL_X_PADDING)
 
             curve = p.plot(pen=pg.mkPen(color=clr, width=DETAIL_LINE_WIDTH))
             curve.setDownsampling(auto=False)
@@ -235,17 +250,17 @@ class DetailWindow(QtWidgets.QMainWindow):
         w = sd.window_sec
 
         # Overlay: 取两信号较大的范围
-        y_lo_overlay, y_hi_overlay = sd.y_range_overlay(self._ch)
-        self._p_overlay.setXRange(0, w, padding=0)
+        y_lo_overlay, y_hi_overlay = sd.y_range_overlay(self._ch, DETAIL_Y_PADDING)
+        self._p_overlay.setXRange(0, w, padding=DETAIL_X_PADDING)
         self._p_overlay.setYRange(y_lo_overlay, y_hi_overlay, padding=0)
 
         # Side-by-side: 各自用自己的幅值
         if hasattr(self, '_p_side_left'):
-            y_lo_orig, y_hi_orig = sd.y_range_detail(self._ch, 'orig')
-            y_lo_recon, y_hi_recon = sd.y_range_detail(self._ch, 'recon')
-            self._p_side_left.setXRange(0, w, padding=0)
+            y_lo_orig, y_hi_orig = sd.y_range_detail(self._ch, 'orig', DETAIL_Y_PADDING)
+            y_lo_recon, y_hi_recon = sd.y_range_detail(self._ch, 'recon', DETAIL_Y_PADDING)
+            self._p_side_left.setXRange(0, w, padding=DETAIL_X_PADDING)
             self._p_side_left.setYRange(y_lo_orig, y_hi_orig, padding=0)
-            self._p_side_right.setXRange(0, w, padding=0)
+            self._p_side_right.setXRange(0, w, padding=DETAIL_X_PADDING)
             self._p_side_right.setYRange(y_lo_recon, y_hi_recon, padding=0)
 
         amp_orig = sd.ch_amp[self._ch] if sd.ch_amp is not None else 0.0

@@ -20,15 +20,13 @@ from pyqtgraph.Qt import QtCore, QtWidgets, QtGui
 
 from config import (COLOR_TEXT, COLOR_SEP, FONT_FAMILY,
                      WIN_WIDTH, WIN_HEIGHT, WIN_X, WIN_Y,
-                     WIN_MAXIMIZED, WIN_TITLE,
-                     DETAIL_OFFSET_X, DETAIL_OFFSET_Y,
-                     WINDOW_SEC, WINDOW_SEC_MIN, WINDOW_SEC_MAX,
-                     AMP_SCALE_MIN, AMP_SCALE_MAX,
-                     SPEED_MUL_MIN, SPEED_MUL_MAX)
-from data import SignalData, LoaderWorker
-from player import Player
+                     WIN_MAXIMIZED, WIN_TITLE)
+from data import (SignalData, LoaderWorker,
+                   WINDOW_SEC, WINDOW_SEC_MIN, WINDOW_SEC_MAX,
+                   AMP_SCALE_MIN, AMP_SCALE_MAX)
+from player import Player, SPEED_MUL_MIN, SPEED_MUL_MAX
 from grid import GridView
-from detail import DetailWindow
+from detail import DetailWindow, DETAIL_OFFSET_X, DETAIL_OFFSET_Y
 
 
 class MainWindow(QtWidgets.QMainWindow):

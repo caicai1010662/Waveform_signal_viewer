@@ -8,14 +8,25 @@ player.py — 播放引擎
   信号流:
     QTimer._tick() → frame_ready(ptr) → 各视图更新 → Player.ack()
 
-  调参入口:
-    config.TARGET_FPS      — 目标帧率（默认 80）
-    config.PLAYBACK_SPEED  — 基础播放速度
-    SPEED_MUL_MIN/MAX      — 变速范围
+  调参入口: 本模块顶部的常量，改完保存 → 重启即可生效。
 """
 
 from pyqtgraph.Qt import QtCore
-from config import TARGET_FPS, PLAYBACK_SPEED, SPEED_MUL_MIN, SPEED_MUL_MAX
+
+
+# ═══════════════════════════════════════════════════════════════
+# 模块参数 — 调这里，不用去 config.py
+# ═══════════════════════════════════════════════════════════════
+
+# 目标帧率。80 = 每秒刷新 80 次
+TARGET_FPS = 80
+
+# 基础播放速度（数据秒 / 真实秒）。0.005 = 1秒数据需要 200 秒播放完
+PLAYBACK_SPEED = 0.005
+
+# 播放速度倍率范围。1.0 = 基础速度
+SPEED_MUL_MIN = 0.5    # 最慢 0.5×
+SPEED_MUL_MAX = 1.5    # 最快 1.5×
 
 
 class Player(QtCore.QObject):

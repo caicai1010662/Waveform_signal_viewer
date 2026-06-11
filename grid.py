@@ -13,13 +13,7 @@ grid.py — 网格视图（核心渲染模块）
   Row 模式 (Compare): VISIBLE_ROWS 条曲线/侧，一通道一行，垂直堆叠
   Tile 模式 (Browse): VISIBLE_TILE_ROWS × TILE_COLS 个栅格/侧
 
-  调参入口:
-    config.VISIBLE_ROWS       — Row 模式可见通道数（低配机 4~6）
-    config.VISIBLE_TILE_ROWS  — Tile 模式可见行数
-    config.TILE_COLS          — Tile 模式每行格子数
-    config.LINE_WIDTH         — 波形线宽
-    config.SPACING_FACTOR     — 通道间距系数（影响 Y 偏移）
-    MAX_POINTS_PER_CURVE      — 每曲线最大点数（超此则步进取样）
+  调参入口: 本模块顶部的常量，改完保存 → 重启即可生效。
 """
 
 import numpy as np
@@ -27,10 +21,25 @@ import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from config import (COLOR_BG, COLOR_CARD, COLOR_ORIG, COLOR_RECON,
-                     COLOR_TEXT, COLOR_SEP, COLOR_ZEBRA, TILE_COLS,
-                     VISIBLE_ROWS, VISIBLE_TILE_ROWS, LINE_WIDTH,
-                     SPACING_FACTOR, FONT_SIZE)
-from data import SignalData
+                     COLOR_TEXT, COLOR_SEP, COLOR_ZEBRA, FONT_SIZE)
+from data import SignalData, SPACING_FACTOR
+
+
+# ═══════════════════════════════════════════════════════════════
+# 模块参数 — 调这里，不用去 config.py
+# ═══════════════════════════════════════════════════════════════
+
+# Browse 模式每行格子数。6 = 一行 6 个通道
+TILE_COLS = 6
+
+# Compare 模式一屏可见行数。6 = 同时显示 6 个通道
+VISIBLE_ROWS = 6
+
+# Browse 模式一屏可见行数。4 = 同时 4 行 × 6 列 = 24 通道
+VISIBLE_TILE_ROWS = 4
+
+# 波形线宽（像素）
+LINE_WIDTH = 1.2
 from utils import make_font, make_pen, format_channel_label
 
 # 每曲线最大数据点数。超过此数 → 每隔 N 个取 1 个（简单步进降采样）
