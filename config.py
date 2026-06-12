@@ -48,8 +48,6 @@ COLOR_ZEBRA  = "#2A2A2A"  # 斑马纹交替行底色（Row 模式每隔一个通
 
 FONT_FAMILY = "Microsoft YaHei Mono"  # 主字体。等宽中英文字体
 FONT_SIZE   = 16               # 全局字号（窗口标题、标签、状态栏等）
-FONT_SIZE_SMALL = 16           # 小字号（按钮文字等）
-
 
 # ════════════════════════════════════════
 # Qt 样式表 (QSS) — 按钮 / 滑动条 / 滚动条 / 标签的外观

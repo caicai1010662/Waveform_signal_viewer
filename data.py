@@ -43,7 +43,9 @@ Y_PERCENTILE = 99.9
 # 通道间距系数。实际间距 = 通道幅值 × SPACING_FACTOR × amp_scale
 SPACING_FACTOR = 3
 
-warnings.filterwarnings("ignore")
+# 仅压制 scipy/h5py 的已知 Future/Deprecation 警告，不影响其他模块
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -95,28 +97,19 @@ SFREQ_KEYS = ['s_freq', 'fs', 'Fs', 'sampling_rate',
               'samplerate', 'sample_rate', 'freq']
 
 
-def _extract_s_freq_from_dict(mat: dict) -> int:
-    """从 scipy .mat (v5/v7) 字典中查找采样率。
+def _extract_s_freq(container, get_item) -> int:
+    """从 mat dict 或 h5py File 中查找采样率。
 
-    遍历 SFREQ_KEYS，找到第一个匹配的字段，取其第一个值。
-    找不到则返回默认值 30000 Hz。
+    遍历 SFREQ_KEYS，用 get_item 适配 dict[key] 和 h5py[key][()] 的差异。
     """
     for key in SFREQ_KEYS:
-        if key in mat:
-            val = np.array(mat[key]).ravel()
-            if val.size > 0:
-                return int(val[0])
-    return 30000  # 默认 30k Sa/s
-
-
-def _extract_s_freq_from_h5(f: h5py.File) -> int:
-    """从 h5py (v7.3) 文件中查找采样率。"""
-    for key in SFREQ_KEYS:
-        if key in f:
-            val = f[key][()]
+        try:
+            val = get_item(container, key)
             v = np.array(val).ravel()
             if v.size > 0:
                 return int(v[0])
+        except Exception:
+            continue
     return 30000
 
 
@@ -153,7 +146,7 @@ def _load_mat_sync(path: str, report=None) -> tuple[np.ndarray, int, str]:
             keys = [k for k in mat if not k.startswith('__')]
             best_key = max(keys, key=lambda k: np.size(mat[k]))
             arr = mat[best_key]
-            s_freq = _extract_s_freq_from_dict(mat)
+            s_freq = _extract_s_freq(mat, lambda c, k: c[k])
             shape = arr.shape
             del mat, arr  # 释放 scipy 数据
             # ── 文件大小校验：同名替换可能导致时间戳不变但内容变了 ──
@@ -189,7 +182,7 @@ def _load_mat_sync(path: str, report=None) -> tuple[np.ndarray, int, str]:
             data = arr.astype(np.float32, copy=False)
 
         _r("正在查找采样率...")
-        s_freq = _extract_s_freq_from_dict(mat)
+        s_freq = _extract_s_freq(mat, lambda c, k: c[k])
         del mat  # 释放原始字典
 
     except NotImplementedError:
@@ -212,7 +205,7 @@ def _load_mat_sync(path: str, report=None) -> tuple[np.ndarray, int, str]:
             data = np.array(best_ds, dtype=np.float32)
 
             _r("正在查找采样率...")
-            s_freq = _extract_s_freq_from_h5(f)
+            s_freq = _extract_s_freq(f, lambda c, k: c[k][()])
 
     # ── 步骤 3: 数据校验 ─────────────────────────────────
     _r("正在校验数据...")
@@ -270,17 +263,7 @@ class LoaderWorker(QtCore.QThread):
 
 
 # ═══════════════════════════════════════════════════════════════
-# 5. 同步兼容接口
-# ═══════════════════════════════════════════════════════════════
-
-def load_mat(path: str) -> np.ndarray:
-    """同步加载 .mat（兼容旧接口），仅返回 data 数组。"""
-    data, _, _ = _load_mat_sync(path)
-    return data
-
-
-# ═══════════════════════════════════════════════════════════════
-# 6. SignalData — 数据容器
+# 5. SignalData — 数据容器
 #    持有原始 + 重建信号，所有显示参数由数据统计特性自动计算。
 #    用户通过滑动条调整 window_sec / amp_scale，参数自动钳制。
 # ═══════════════════════════════════════════════════════════════
@@ -308,7 +291,6 @@ class SignalData:
 
     # ── 数据计算参数（compute_params() 后填充）─────────
     ch_amp: Optional[np.ndarray] = None  # (n_chan,) 每通道幅值 (µV)
-    ch_amp_computed: bool = False        # ch_amp 是否已计算
 
     # ── 状态属性 ────────────────────────────────────────
 
@@ -316,11 +298,6 @@ class SignalData:
     def ready(self) -> bool:
         """数据是否已加载。"""
         return self.recon is not None
-
-    @property
-    def total_rows(self) -> int:
-        """总行数 = 通道总数。"""
-        return self.n_chan if self.n_chan > 0 else 0
 
     def max_channel_offset(self, per_page: int = 1) -> int:
         """滑块最大值，保证最后一页始终满屏 per_page 个通道。
@@ -345,7 +322,6 @@ class SignalData:
         self.ch_amp = np.maximum(
             np.percentile(np.abs(sample), Y_PERCENTILE, axis=1), 1.0)
         self.window_pts = int(self.window_sec * self.s_freq)
-        self.ch_amp_computed = True
 
     # ── 参数设置（自动钳制到合理范围）───────────────────
 
@@ -375,20 +351,6 @@ class SignalData:
         amp = float(self.ch_amp[ch]) * y_padding * self.amp_scale
         return (-amp, amp)
 
-    def y_offset(self, ch: int) -> float:
-        """返回通道 ch 在 Row 模式下的 Y 轴中心偏移量。
-
-        Ch1 在最顶部（偏移最大），Ch2048 在最底部（偏移最小）。
-        偏移从底部向上累计：offset[ch] = sum(heights[ch+1:]) + heights[ch]/2
-        """
-        if self.ch_amp is None:
-            return float(ch) * 100.0
-        heights = self.ch_amp * SPACING_FACTOR * self.amp_scale
-        cum = 0.0
-        for i in range(self.n_chan - 1, ch, -1):
-            cum += heights[i]
-        return cum + heights[ch] / 2
-
     def y_offsets_all(self) -> np.ndarray:
         """返回所有 2048 个通道的 Y 偏移数组 (n_chan,)。
 
@@ -406,12 +368,3 @@ class SignalData:
             cum += heights[i]
         return offsets
 
-    @property
-    def total_y_height(self) -> float:
-        """所有通道堆叠的总高度（用于 Y 视口范围计算）。
-
-        = sum(ch_amp × SPACING_FACTOR × amp_scale)
-        """
-        if self.ch_amp is None:
-            return self.n_chan * 100.0
-        return float(np.sum(self.ch_amp * SPACING_FACTOR * self.amp_scale))

@@ -72,7 +72,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._ch_timer = QtCore.QTimer()
         self._ch_timer.setSingleShot(True)
         self._ch_timer.setInterval(30)
-        self._ch_timer.timeout.connect(self._on_ch_debounce)
+        self._ch_timer.timeout.connect(self._apply_ch_offset)
 
         self._build()
         self._bind_keys()
@@ -330,20 +330,31 @@ class MainWindow(QtWidgets.QMainWindow):
     # ═══════════════════════════════════════════════════════════
 
     def _on_mode_change(self, btn):
-        """模式按钮点击回调。QButtonGroup 保证互斥。"""
+        """模式按钮点击回调。QButtonGroup 保证互斥。
+
+        切换时保持当前通道位置，而非归零。
+        """
         mode_map = {self._btn_row: "row",
                      self._btn_tile: "tile"}
         new_mode = mode_map.get(btn, "row")
         if new_mode == self._mode:
             return
+
+        # 保存当前通道位置
+        saved_offset = self._slider_ch.value()
+
         self._mode = new_mode
         self._grid.set_mode(new_mode)
         if self._sd.ready:
-            self._grid.build()
             per_page = (VISIBLE_ROWS if new_mode == "row"
                         else TILE_COLS * VISIBLE_TILE_ROWS)
-            self._slider_ch.setMaximum(
-                self._sd.max_channel_offset(per_page))
+            slider_max = self._sd.max_channel_offset(per_page)
+            self._slider_ch.blockSignals(True)
+            self._slider_ch.setMaximum(slider_max)
+            self._slider_ch.setValue(min(saved_offset, slider_max))
+            self._slider_ch.blockSignals(False)
+            # 通知 grid 更新到当前位置（set_mode 内已 build，这里只同步 offset）
+            self._grid.set_offset(self._sd, self._slider_ch.value())
 
     def _load_signal(self):
         """加载/重载信号 .mat 文件 → 计算幅值 → 构建视图 → 启用控件。"""
@@ -473,23 +484,20 @@ class MainWindow(QtWidgets.QMainWindow):
     #   每个回调做三件事: 更新 SignalData → 更新视图 → 更新标签文字
     # ═══════════════════════════════════════════════════════════
 
-    def _on_ch_scroll(self, val: int):
-        """通道滑动条拖动中 — 30ms 短防抖，保证拖动时有视觉反馈但不卡。"""
-        if not self._sd.ready:
-            return
-        self._ch_timer.start()
-
-    def _on_ch_debounce(self):
-        """防抖回调 — 用滑动条当前值执行通道切换。"""
-        if not self._sd.ready:
-            return
-        self._grid.set_offset(self._sd, self._slider_ch.value())
-
-    def _on_ch_released(self):
-        """松手时立即执行通道切换，不等待防抖定时器。"""
-        self._ch_timer.stop()
+    def _apply_ch_offset(self):
+        """执行通道切换 — 用滑动条当前值更新 grid 视口。"""
         if self._sd.ready:
             self._grid.set_offset(self._sd, self._slider_ch.value())
+
+    def _on_ch_scroll(self, val: int):
+        """通道滑动条拖动中 — 启动 30ms 短防抖定时器。"""
+        if self._sd.ready:
+            self._ch_timer.start()
+
+    def _on_ch_released(self):
+        """松手时立即执行，不等防抖。"""
+        self._ch_timer.stop()
+        self._apply_ch_offset()
 
     def _ch_up(self):
         """↑ 键 — 向上滚动一个通道。"""

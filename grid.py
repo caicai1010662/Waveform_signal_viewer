@@ -267,16 +267,19 @@ class GridView(QtWidgets.QWidget):
     # 数据填充
     # ═══════════════════════════════════════════════════════════
 
-    def _fill_row_data(self, sd: SignalData, ptr: int):
+    def _prepare_frame(self, sd, ptr):
+        """帧数据准备: 钳位 ptr → 生成时间轴 → 步进降采样。"""
         wp = sd.window_pts
         if ptr + wp > sd.n_samples:
             ptr = max(0, sd.n_samples - wp)
         t_slice = slice(ptr, ptr + wp)
         if len(self._t_buf) != wp:
             self._t_buf = np.arange(wp, dtype=np.float32) / sd.s_freq
-        t = self._t_buf
-        t, wp = _step_decimate(t, wp)
+        t, wp = _step_decimate(self._t_buf, wp)
+        return t_slice, t, wp
 
+    def _fill_row_data(self, sd: SignalData, ptr: int):
+        t_slice, t, wp = self._prepare_frame(sd, ptr)
         n_pool = len(self._curves)
 
         for i in range(n_pool):
@@ -315,14 +318,7 @@ class GridView(QtWidgets.QWidget):
                     self._zebra_rects[zi].setVisible(False)
 
     def _fill_tile_data(self, sd: SignalData, ptr: int):
-        wp = sd.window_pts
-        if ptr + wp > sd.n_samples:
-            ptr = max(0, sd.n_samples - wp)
-        t_slice = slice(ptr, ptr + wp)
-        if len(self._t_buf) != wp:
-            self._t_buf = np.arange(wp, dtype=np.float32) / sd.s_freq
-        t = self._t_buf
-        t, wp = _step_decimate(t, wp)
+        t_slice, t, wp = self._prepare_frame(sd, ptr)
 
         for (r, c), (pi, curve, label) in self._tiles.items():
             abs_ch = self._ch_offset + r * TILE_COLS + c
@@ -436,5 +432,6 @@ class GridView(QtWidgets.QWidget):
 def _step_decimate(t: np.ndarray, wp: int) -> tuple[np.ndarray, int]:
     if wp > MAX_POINTS_PER_CURVE:
         step = wp // MAX_POINTS_PER_CURVE + 1
-        return t[::step], len(t[::step])
+        out = t[::step]
+        return out, len(out)
     return t, wp

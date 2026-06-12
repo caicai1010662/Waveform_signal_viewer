@@ -38,14 +38,12 @@ class Player(QtCore.QObject):
     信号:
         frame_ready(int)   — 每帧发射，携带当前采样点位置（ptr）
         state_changed(bool)— 播放/暂停状态变化
-        speed_changed(float)— 速度倍率变化
         loop_changed(bool) — 循环模式变化（True=循环, False=单次）
     """
 
-    # Qt 信号（跨线程安全的发布/订阅机制）
+    # Qt 信号
     frame_ready   = QtCore.pyqtSignal(int)
     state_changed = QtCore.pyqtSignal(bool)
-    speed_changed = QtCore.pyqtSignal(float)
     loop_changed  = QtCore.pyqtSignal(bool)
 
     def __init__(self):
@@ -131,23 +129,19 @@ class Player(QtCore.QObject):
             mul: 速度倍率。1.0 = 基础速度，2.0 = 两倍速。
         """
         self.speed_mul = max(SPEED_MUL_MIN, min(SPEED_MUL_MAX, mul))
-        self.speed_changed.emit(self.speed_mul)
 
     def speed_up(self):
-        """加快一档。Ctrl+↑ 键调用。
-
-        档位表与 SPEED_MUL_MIN/MAX 对齐：
-        当前 MIN=0.5, MAX=1.5 → 三档 [0.5, 1.0, 1.5]。
-        扩大范围时只需同步改此列表。
-        """
-        for s in [0.5, 1.0, 1.5]:
-            if s > self.speed_mul + 0.001:  # 浮点安全余量
+        """加快一档。Ctrl+↑。档位由 SPEED_MUL_MIN/MAX 自动均分。"""
+        mid = (SPEED_MUL_MIN + SPEED_MUL_MAX) / 2
+        for s in (SPEED_MUL_MIN, mid, SPEED_MUL_MAX):
+            if s > self.speed_mul + 0.001:
                 self.set_speed(s)
                 return
 
     def speed_down(self):
-        """减慢一档。Ctrl+↓ 键调用。"""
-        for s in [1.5, 1.0, 0.5]:
+        """减慢一档。Ctrl+↓。"""
+        mid = (SPEED_MUL_MIN + SPEED_MUL_MAX) / 2
+        for s in (SPEED_MUL_MAX, mid, SPEED_MUL_MIN):
             if s < self.speed_mul - 0.001:
                 self.set_speed(s)
                 return
