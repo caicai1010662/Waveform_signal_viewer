@@ -18,8 +18,7 @@ import weakref
 
 from pyqtgraph.Qt import QtCore, QtWidgets, QtGui
 
-from config import (COLOR_TEXT, FONT_FAMILY,
-                     WIN_WIDTH, WIN_HEIGHT, WIN_X, WIN_Y,
+from config import (WIN_WIDTH, WIN_HEIGHT, WIN_X, WIN_Y,
                      WIN_MAXIMIZED, WIN_TITLE)
 from data import (SignalData, LoaderWorker,
                    WINDOW_SEC, WINDOW_SEC_MIN, WINDOW_SEC_MAX,
@@ -27,6 +26,7 @@ from data import (SignalData, LoaderWorker,
 from player import Player, SPEED_MUL_MIN, SPEED_MUL_MAX
 from grid import GridView, VISIBLE_ROWS, TILE_COLS, VISIBLE_TILE_ROWS
 from detail import DetailWindow, DETAIL_OFFSET_X, DETAIL_OFFSET_Y
+from utils import make_font
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -90,9 +90,10 @@ class MainWindow(QtWidgets.QMainWindow):
         root.setSpacing(4)
 
         # ══ 顶栏 ══════════════════════════════════════════
+        font18 = make_font(20)
         bar = QtWidgets.QHBoxLayout()
         bar.setContentsMargins(4, 2, 4, 2)
-        bar.setSpacing(8)
+        bar.setSpacing(10)
 
         # ── 文件加载 ──────────────────────────────────────
         self._btn_load = QtWidgets.QPushButton("Load Data")
@@ -136,69 +137,45 @@ class MainWindow(QtWidgets.QMainWindow):
         bar.addWidget(self._btn_play)
         bar.addWidget(self._btn_loop)
 
-        # 元信息标签 — 加载数据后显示通道数/采样率/总时长
-        self._lbl_info = QtWidgets.QLabel("")
-        self._lbl_info.setStyleSheet(
-            f"color: #808080; font-size: 16px; font-weight: bold;")
-        bar.addWidget(self._lbl_info)
-
         bar.addStretch(1)  # 弹簧 — 把右侧滑块推到最右边
 
-        # ── 时窗滑动条组 ──────────────────────────────────
-        # 改标签文字: 修改 "Time:" 字符串
-        # 改标签样式: 修改 setStyleSheet 中的 color / font-size
-        # 改数值框样式: 找到 _make_info_label() 方法
+        # ── 时窗 ──────────────────────────────────────────
         lbl_time_title = QtWidgets.QLabel("Time:")
-        lbl_time_title.setStyleSheet(
-            f"color: {COLOR_TEXT}; font-size: 22px; font-weight: bold;")
+        lbl_time_title.setFont(font18)
+        lbl_time_title.setStyleSheet("color: #AAAAAA;")
         bar.addWidget(lbl_time_title)
-
-        self._lbl_win = self._make_info_label("50ms")  # 数值框
-        self._lbl_win.setStyleSheet(
-            f"color: {COLOR_TEXT}; font-size: 20px; font-weight: bold;")
+        self._lbl_win = self._make_info_label("50ms")
         bar.addWidget(self._lbl_win)
-
-        self._slider_win = self._make_h_slider()       # 滑条
+        self._slider_win = self._make_h_slider()
         self._slider_win.valueChanged.connect(self._on_win_slider)
         self._slider_win.sliderReleased.connect(self._on_win_released)
         bar.addWidget(self._slider_win)
 
-        # ── 幅值滑动条组 ──────────────────────────────────
-        lbl_amp_title = QtWidgets.QLabel("  Amp:")
-        lbl_amp_title.setStyleSheet(
-            f"color: {COLOR_TEXT}; font-size: 22px; font-weight: bold;")
+        # ── 幅值 ──────────────────────────────────────────
+        bar.addWidget(self._make_spacer(10))
+        lbl_amp_title = QtWidgets.QLabel("Amp:")
+        lbl_amp_title.setFont(font18)
+        lbl_amp_title.setStyleSheet("color: #AAAAAA;")
         bar.addWidget(lbl_amp_title)
-
         self._lbl_amp = self._make_info_label("1.0×")
-        self._lbl_amp.setStyleSheet(
-            f"color: {COLOR_TEXT}; font-size: 20px; font-weight: bold;")
         bar.addWidget(self._lbl_amp)
-
         self._slider_amp = self._make_h_slider()
         self._slider_amp.valueChanged.connect(self._on_amp_slider)
         self._slider_amp.sliderReleased.connect(self._on_amp_released)
         bar.addWidget(self._slider_amp)
 
-        # ── 速度滑动条组 ──────────────────────────────────
-        lbl_speed_title = QtWidgets.QLabel("  Speed:")
-        lbl_speed_title.setStyleSheet(
-            f"color: {COLOR_TEXT}; font-size: 22px; font-weight: bold;")
+        # ── 速度 ──────────────────────────────────────────
+        bar.addWidget(self._make_spacer(10))
+        lbl_speed_title = QtWidgets.QLabel("Speed:")
+        lbl_speed_title.setFont(font18)
+        lbl_speed_title.setStyleSheet("color: #AAAAAA;")
         bar.addWidget(lbl_speed_title)
-
         self._lbl_speed = self._make_info_label("1.0×")
-        self._lbl_speed.setStyleSheet(
-            f"color: {COLOR_TEXT}; font-size: 20px; font-weight: bold;")
         bar.addWidget(self._lbl_speed)
-
         self._slider_speed = self._make_h_slider()
         self._slider_speed.valueChanged.connect(self._on_speed_slider)
         bar.addWidget(self._slider_speed)
 
-        # ── 绝对时间戳（顶栏最右侧）──────────────────────
-        self._lbl_timestamp = QtWidgets.QLabel("00m 00.000s")
-        self._lbl_timestamp.setStyleSheet(
-            f"color: {COLOR_TEXT}; font-size: 18px; font-weight: bold;")
-        bar.addWidget(self._lbl_timestamp)
 
         root.addLayout(bar)
 
@@ -228,7 +205,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._slider_ch.setMaximum(0)              # 加载数据后更新
         self._slider_ch.setInvertedAppearance(True) # 向上拖 = 值增大
         self._slider_ch.setInvertedControls(True)
-        self._slider_ch.setFixedWidth(22)           # 滑条宽度（与 QSS groove width 一致）
+        self._slider_ch.setFixedWidth(12)           # 与 QSS groove width 一致
         self._slider_ch.valueChanged.connect(self._on_ch_scroll)
         self._slider_ch.sliderReleased.connect(self._on_ch_released)
         self._slider_ch.setEnabled(False)
@@ -258,25 +235,24 @@ class MainWindow(QtWidgets.QMainWindow):
 
     @staticmethod
     def _make_vsep() -> QtWidgets.QFrame:
-        """创建垂直分隔线。"""
         f = QtWidgets.QFrame()
         f.setFrameShape(QtWidgets.QFrame.VLine)
         f.setStyleSheet("border: none; background-color: #474748;")
         f.setFixedWidth(1)
         return f
 
-    def _make_info_label(self, text: str) -> QtWidgets.QLabel:
-        """创建数值显示框（如 "50ms"、"1.0×"）。
+    @staticmethod
+    def _make_spacer(width: int = 10) -> QtWidgets.QWidget:
+        w = QtWidgets.QWidget()
+        w.setFixedWidth(width)
+        return w
 
-        改颜色: color / background
-        改字号: font-size
-        改宽度: setFixedWidth(55)
-        """
+    @staticmethod
+    def _make_info_label(text: str, font_size: int = 20) -> QtWidgets.QLabel:
+        """创建数值标签（如 "50ms"、"1.0×"）。"""
         lbl = QtWidgets.QLabel(text)
-        lbl.setStyleSheet(
-            f"color: #FFFFFF; font-family: '{FONT_FAMILY}'; "
-            f"font-size: 13px; font-weight: bold; padding: 4px 6px; "
-            f"background: #252526; border: 1px solid #3E3E42; border-radius: 4px;")
+        lbl.setFont(make_font(font_size))
+        lbl.setStyleSheet("color: #FFFFFF;")
         lbl.setFixedWidth(55)
         lbl.setAlignment(QtCore.Qt.AlignCenter)
         return lbl
@@ -375,12 +351,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
                 self._sd.compute_params()
 
-                total_s = self._sd.n_samples / self._sd.s_freq
-                self._lbl_info.setText(
-                    f"{self._sd.n_chan}ch · "
-                    f"{self._sd.s_freq / 1000:.0f}kSa/s · "
-                    f"{total_s:.1f}s")
-
                 self._grid.set_mode(self._mode)
                 self._grid.build()
 
@@ -463,10 +433,6 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         try:
             self._grid.scroll(ptr, self._sd)
-            # 更新绝对时间戳
-            abs_sec = ptr / self._sd.s_freq
-            mins, sec = divmod(abs_sec, 60)
-            self._lbl_timestamp.setText( f"{int(mins):02d}m {sec:06.3f}s")
         finally:
             self._player.ack()
 

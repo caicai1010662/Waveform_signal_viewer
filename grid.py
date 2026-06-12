@@ -39,7 +39,10 @@ VISIBLE_ROWS = 6
 VISIBLE_TILE_ROWS = 4
 
 # 波形线宽（像素）
-LINE_WIDTH = 1.2
+LINE_WIDTH = 1.0
+
+# Grid 模式下 Y 轴留白系数（1.3 = 上下各 15% 呼吸空间）
+GRID_Y_PADDING = 1.0
 
 # 每曲线最大数据点数。超过此数 → 每隔 N 个取 1 个（简单步进降采样）
 MAX_POINTS_PER_CURVE = 6000
@@ -115,7 +118,7 @@ class GridView(QtWidgets.QWidget):
 
         self._tile_grid = pg.GraphicsLayoutWidget()
         self._tile_grid.setBackground(COLOR_BG)
-        self._tile_grid.ci.layout.setSpacing(2)
+        self._tile_grid.ci.layout.setSpacing(8)
         tile_lay.addWidget(self._tile_grid, 1)
 
         root.addWidget(self._row_widget)
@@ -221,10 +224,10 @@ class GridView(QtWidgets.QWidget):
                 if abs_ch >= sd.n_chan:
                     break
                 ch_amp = float(sd.ch_amp[abs_ch]) * sd.amp_scale
-                y_lo, y_hi = -ch_amp * 1.2, ch_amp * 1.2
+                y_lo, y_hi = -ch_amp * GRID_Y_PADDING, ch_amp * GRID_Y_PADDING
 
                 pi = self._tile_grid.addPlot(row=r, col=c)
-                lbl = self._config_tile_plot(pi, abs_ch, font, y_lo, y_hi)
+                lbl = self._config_tile_plot(pi, abs_ch, y_lo, y_hi)
                 curve = pi.plot(pen=make_pen(COLOR_SIGNAL, LINE_WIDTH))
                 curve.setDownsampling(auto=False)
                 curve.setSkipFiniteCheck(True)
@@ -236,23 +239,23 @@ class GridView(QtWidgets.QWidget):
             pi.setXRange(0, w, padding=0)
 
     def _config_tile_plot(self, pi: pg.PlotItem, ch: int,
-                          font: QtGui.QFont, y_lo: float, y_hi: float):
+                          y_lo: float, y_hi: float):
         pi.getViewBox().setBackgroundColor(COLOR_CARD)
-        # Tile 边框 — 区分相邻通道
-        pi.getViewBox().setBorder(pg.mkPen(color="#474748", width=1.5))
+        pi.getViewBox().setBorder(pg.mkPen(color="#666672", width=1.0))
         pi.hideButtons()
         pi.setMouseEnabled(x=False, y=False)
         pi.setMenuEnabled(False)
         pi.hideAxis('left')
         pi.hideAxis('bottom')
         pi.setYRange(y_lo, y_hi, padding=0)
+
         label = pg.TextItem(format_channel_label(ch),
-                            color=COLOR_TEXT, anchor=(0, 1),
-                            fill=pg.mkBrush(COLOR_CARD))
-        label.setFont(font)
+                            color="#FFFFFF", anchor=(0, 1))
+        label.setFont(make_font(FONT_SIZE))
         label.setZValue(100)
         pi.addItem(label)
-        label.setPos(0, y_lo + (y_hi - y_lo) * 0.02)
+        x_margin = self._sd.window_sec * 0.02
+        label.setPos(x_margin, y_lo + (y_hi - y_lo) * 0.05)
         return label
 
     def clear(self):
@@ -328,9 +331,10 @@ class GridView(QtWidgets.QWidget):
                 label.setText(format_channel_label(abs_ch))
                 label.setVisible(True)
                 ch_amp = float(sd.ch_amp[abs_ch]) * sd.amp_scale
-                y_lo = -ch_amp * 1.2
-                y_hi = ch_amp * 1.2
-                label.setPos(0, y_lo + (y_hi - y_lo) * 0.02)
+                y_lo = -ch_amp * GRID_Y_PADDING
+                y_hi = ch_amp * GRID_Y_PADDING
+                label.setPos(self._sd.window_sec * 0.02,
+                            y_lo + (y_hi - y_lo) * 0.05)
                 pi.setYRange(y_lo, y_hi, padding=0)
             else:
                 curve.setVisible(False)

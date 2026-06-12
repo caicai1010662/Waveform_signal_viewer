@@ -47,7 +47,7 @@ COLOR_ZEBRA  = "#2A2A2A"  # 斑马纹交替行底色（Row 模式每隔一个通
 # ═══════════════════════════════════════════════════════════════
 
 FONT_FAMILY = "Microsoft YaHei Mono"  # 主字体。等宽中英文字体
-FONT_SIZE   = 16               # 全局字号（窗口标题、标签、状态栏等）
+FONT_SIZE   = 18              # 全局字号
 
 # ════════════════════════════════════════
 # Qt 样式表 (QSS) — 按钮 / 滑动条 / 滚动条 / 标签的外观
@@ -66,13 +66,13 @@ QWidget {{
 
 /* ── 普通按钮 (Load / Start / Loop / Compare / Browse) ── */
 QPushButton {{
-    background-color: #3C3C3C;   /* 按钮底色 */
-    color: #E0E0E0;              /* 按钮文字色 */
-    border: 1px solid transparent; /* 边框透明，扁平化 */
-    border-radius: 10px;         /* 圆角半径 */
-    padding: 10px 20px;          /* 内边距：上下 10px，左右 20px */
-    font-size: 20px;             /* 按钮字号 */
-    font-weight: bold;           /* 加粗 */
+    background-color: #3C3C3C;
+    color: #E0E0E0;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 6px 14px;
+    font-size: 20px;
+    font-weight: bold;
 }}
 /* 鼠标悬停 */
 QPushButton:hover {{
@@ -97,19 +97,19 @@ QPushButton:checked {{
 }}
 
 /* ── 水平滑动条 (顶部 Time / Amp / Speed) ── */
-/* 滑轨（长条背景） */
+/* 滑轨 */
 QSlider::groove:horizontal {{
-    background: {COLOR_SLIDER};  /* 轨道颜色 */
-    height: 22px;                /* 轨道高度 — 大轨道好瞄准 */
-    border-radius: 11px;         /* 轨道圆角 */
+    background: {COLOR_SLIDER};
+    height: 16px;
+    border-radius: 4px;
 }}
-/* 滑块手柄（可拖动的那个小方块） */
+/* 手柄 */
 QSlider::handle:horizontal {{
-    background: {COLOR_ACCENT};  /* 手柄颜色 = 主题蓝 */
-    width: 22px;                 /* 手柄宽度 — 加大后拖动不费劲 */
-    height: 22px;                /* 手柄高度 */
-    margin: -2px 0;              /* 微调垂直居中 */
-    border-radius: 11px;         /* 手柄圆角 */
+    background: {COLOR_ACCENT};
+    width: 16px;
+    height: 16px;
+    margin: -1px 0;
+    border-radius: 4px;
 }}
 /* 滑块悬停 */
 QSlider::handle:horizontal:hover {{
@@ -119,17 +119,23 @@ QSlider::handle:horizontal:hover {{
 /* ── 垂直滑动条 (右侧通道浏览 _slider_ch) ── */
 /* 滑轨 */
 QSlider::groove:vertical {{
-    background: {COLOR_SLIDER};  /* 轨道颜色 */
-    width: 22px;                 /* 轨道宽度 — 加粗后好瞄准 */
-    border-radius: 11px;         /* 轨道圆角 */
+    background: transparent;
+    width: 10px;
+    border-radius: 3px;
 }}
-/* 滑块手柄 */
+/* 手柄 */
 QSlider::handle:vertical {{
-    background: {COLOR_ACCENT};  /* 手柄颜色 = 主题蓝 */
-    height: 50px;                /* 手柄高度 — 抓取面积更大 */
-    width: 22px;                 /* 手柄宽度 */
-    margin: 0 -2px;              /* 微调水平居中 */
-    border-radius: 11px;         /* 手柄圆角 */
+    background: #464646;
+    height: 40px;
+    width: 8px;
+    margin: 0 1px;
+    border-radius: 4px;
+}}
+QSlider::handle:vertical:hover {{
+    background: #5A5A5A;
+}}
+QSlider::handle:vertical:pressed {{
+    background: {COLOR_ACCENT};
 }}
 /* 滑块悬停 */
 QSlider::handle:vertical:hover {{
