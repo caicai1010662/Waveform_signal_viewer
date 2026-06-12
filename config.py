@@ -33,12 +33,10 @@ WIN_TITLE = "SignalViewer"  # 窗口标题
 
 COLOR_BG     = "#181818"  # 窗口底色（最外层背景）
 COLOR_CARD   = "#1E1E1E"  # 波形面板底色（比 BG 稍亮一点，形成层级感）
-COLOR_ORIG   = "#4FC1FF"  # 原始信号曲线颜色
-COLOR_RECON  = "#DCDCAA"  # 重建信号曲线颜色
+COLOR_SIGNAL = "#DCDCAA"  # 信号曲线颜色
 COLOR_GRID   = "#4A4A4A"  # Detail 窗坐标轴刻度线颜色
 COLOR_ACCENT = "#007ACC"  # 交互强调色（按钮选中、滑块手柄、hover 高亮）
 COLOR_TEXT   = "#FFFFFF"  # 所有文字的颜色
-COLOR_SEP    = "#474748"  # 中轴分隔线（强化左右面板的切割感）
 COLOR_SLIDER = "#464646"  # 滑动条轨道底色（比卡片稍亮，确保轨道可见）
 COLOR_HOVER  = "#2A2D2E"  # 鼠标悬停时的底色
 COLOR_ZEBRA  = "#2A2A2A"  # 斑马纹交替行底色（Row 模式每隔一个通道的浅色背景）
@@ -163,7 +161,7 @@ QLabel {{
 }}
 QProgressDialog, QMessageBox {{
     background: {COLOR_CARD};
-    border: 1px solid {COLOR_SEP};
+    border: 1px solid #3E3E42;
 }}
 """
 

@@ -18,14 +18,14 @@ import weakref
 
 from pyqtgraph.Qt import QtCore, QtWidgets, QtGui
 
-from config import (COLOR_TEXT, COLOR_SEP, FONT_FAMILY,
+from config import (COLOR_TEXT, FONT_FAMILY,
                      WIN_WIDTH, WIN_HEIGHT, WIN_X, WIN_Y,
                      WIN_MAXIMIZED, WIN_TITLE)
 from data import (SignalData, LoaderWorker,
                    WINDOW_SEC, WINDOW_SEC_MIN, WINDOW_SEC_MAX,
                    AMP_SCALE_MIN, AMP_SCALE_MAX)
 from player import Player, SPEED_MUL_MIN, SPEED_MUL_MAX
-from grid import GridView
+from grid import GridView, VISIBLE_ROWS, TILE_COLS, VISIBLE_TILE_ROWS
 from detail import DetailWindow, DETAIL_OFFSET_X, DETAIL_OFFSET_Y
 
 
@@ -34,15 +34,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
     布局:
       ┌─────────────────────────────────────────────┐
-      │ [Load] [Load] | [Compare][Browse] |         │
+      │ [Load Signal] | [Compare][Browse] |         │
       │ [Start] [Loop]    Time: [50ms] ─━─          │ ← 顶栏
       │                   Amp: [1.0×] ─━─           │
       │                   Speed:[1.0×] ─━─           │
       ├─────────────────────────────────────────────┤
-      │ ┌─────────────┐ │ ┌─────────────┐ ┌──────┐ │
-      │ │  Rawdata     │ │ │  Recdata     │ │ 通道 │ │ ← 波形区
-      │ │  (左侧)     │ │ │  (右侧)     │ │ 滑块 │ │
-      │ └─────────────┘ │ └─────────────┘ └──────┘ │
+      │ ┌─────────────────────────────────┐ ┌────┐ │
+      │ │          Signal                  │ │通道│ │ ← 波形区
+      │ └─────────────────────────────────┘ └────┘ │
       └─────────────────────────────────────────────┘
     """
 
@@ -57,7 +56,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.showMaximized()
 
         # ── 核心对象 ─────────────────────────────────────
-        self._sd = SignalData()          # 数据容器（原始 + 重建）
+        self._sd = SignalData()          # 数据容器
         self._player = Player()          # 播放引擎
 
         # ── 连接播放信号 ─────────────────────────────────
@@ -95,25 +94,20 @@ class MainWindow(QtWidgets.QMainWindow):
         bar.setContentsMargins(4, 2, 4, 2)
         bar.setSpacing(8)
 
-        # ── 文件加载按钮 ──────────────────────────────────
-        self._btn_orig = QtWidgets.QPushButton("Load Rawdata (.mat)")
-        self._btn_orig.clicked.connect(self._load_orig)
+        # ── 文件加载 ──────────────────────────────────────
+        self._btn_load = QtWidgets.QPushButton("Load Data")
+        self._btn_load.clicked.connect(self._load_signal)
 
-        self._btn_recon = QtWidgets.QPushButton("Load Recdata (.mat)")
-        self._btn_recon.clicked.connect(self._load_recon)
-        self._btn_recon.setEnabled(False)  # 先加载原始信号后才能加载重建
-
-        bar.addWidget(self._btn_orig)
-        bar.addWidget(self._btn_recon)
+        bar.addWidget(self._btn_load)
         bar.addWidget(self._make_vsep())
 
         # ── 模式切换按钮（三段式）─────────────────────────
         # 无专属样式，完全继承 config.py 全局按钮风格
-        self._btn_row = QtWidgets.QPushButton("Compare")
+        self._btn_row = QtWidgets.QPushButton("Trace")
         self._btn_row.setCheckable(True)
         self._btn_row.setChecked(True)
 
-        self._btn_tile = QtWidgets.QPushButton("Browse")
+        self._btn_tile = QtWidgets.QPushButton("Grid")
         self._btn_tile.setCheckable(True)
 
         # QButtonGroup 保证两者互斥
@@ -141,6 +135,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
         bar.addWidget(self._btn_play)
         bar.addWidget(self._btn_loop)
+
+        # 元信息标签 — 加载数据后显示通道数/采样率/总时长
+        self._lbl_info = QtWidgets.QLabel("")
+        self._lbl_info.setStyleSheet(
+            f"color: #808080; font-size: 16px; font-weight: bold;")
+        bar.addWidget(self._lbl_info)
 
         bar.addStretch(1)  # 弹簧 — 把右侧滑块推到最右边
 
@@ -195,7 +195,7 @@ class MainWindow(QtWidgets.QMainWindow):
         bar.addWidget(self._slider_speed)
 
         # ── 绝对时间戳（顶栏最右侧）──────────────────────
-        self._lbl_timestamp = QtWidgets.QLabel("00:00.000")
+        self._lbl_timestamp = QtWidgets.QLabel("00m 00.000s")
         self._lbl_timestamp.setStyleSheet(
             f"color: {COLOR_TEXT}; font-size: 18px; font-weight: bold;")
         bar.addWidget(self._lbl_timestamp)
@@ -205,7 +205,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # ══ 分隔线 ════════════════════════════════════════
         sep = QtWidgets.QFrame()
         sep.setFrameShape(QtWidgets.QFrame.HLine)
-        sep.setStyleSheet(f"border: none; background-color: {COLOR_SEP};")
+        sep.setStyleSheet("border: none; background-color: #474748;")
         sep.setFixedHeight(1)
         root.addWidget(sep)
 
@@ -261,7 +261,7 @@ class MainWindow(QtWidgets.QMainWindow):
         """创建垂直分隔线。"""
         f = QtWidgets.QFrame()
         f.setFrameShape(QtWidgets.QFrame.VLine)
-        f.setStyleSheet(f"border: none; background-color: {COLOR_SEP};")
+        f.setStyleSheet("border: none; background-color: #474748;")
         f.setFixedWidth(1)
         return f
 
@@ -340,79 +340,46 @@ class MainWindow(QtWidgets.QMainWindow):
         self._grid.set_mode(new_mode)
         if self._sd.ready:
             self._grid.build()
+            per_page = (VISIBLE_ROWS if new_mode == "row"
+                        else TILE_COLS * VISIBLE_TILE_ROWS)
             self._slider_ch.setMaximum(
-                max(0, self._sd.max_channel_offset))
+                self._sd.max_channel_offset(per_page))
 
-    def _load_orig(self):
-        """加载原始信号 .mat 文件。"""
+    def _load_signal(self):
+        """加载/重载信号 .mat 文件 → 计算幅值 → 构建视图 → 启用控件。"""
+        self._player.pause()  # 先停止播放，防止换文件时状态混乱
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Select Rawdata .mat File", "",
+            self, "Select Signal .mat File", "",
             "MAT Files (*.mat);;All (*)")
         if not path:
             return
 
         def on_done(data, s_freq, raw_path):
-            """加载完成回调（在主线程中执行）。"""
-            self._sd.orig = data
-            self._sd.orig_path = raw_path or path
-            self._sd.s_freq = s_freq
-            self._sd.n_chan = data.shape[0]
-            self._sd.n_samples = data.shape[1]
-            self._btn_recon.setEnabled(True)
-
-        self._load_mat_async(path, "Loading Rawdata", on_done)
-
-    def _load_recon(self):
-        """加载重建信号 .mat 文件。
-
-        校验: 通道数必须匹配原始信号（允许转置修正）。
-              时间长度以较短的为准。
-        加载完成后: 计算通道参数 → 构建视图 → 启用所有控件。
-        """
-        if self._sd.orig is None:
-            return
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Select Recdata .mat File", "",
-            "MAT Files (*.mat);;All (*)")
-        if not path:
-            return
-
-        def on_done(recon, _s_freq, raw_path):
             try:
-                # ── 通道数校验 ──────────────────────────────
-                if recon.shape[0] != self._sd.n_chan:
-                    if recon.shape[1] == self._sd.n_chan:
-                        recon = recon.T  # 自动转置（行/列互换）
-                    else:
-                        raise ValueError(
-                            f"Channel count mismatch! "
-                            f"Rawdata: {self._sd.n_chan}, "
-                            f"Recdata: {recon.shape[0]}")
-
-                # ── 长度对齐（取较短者）─────────────────────
-                min_len = min(self._sd.n_samples, recon.shape[1])
-                if self._sd.orig.shape[1] > min_len:
-                    self._sd.orig = self._sd.orig[:, :min_len]
-                self._sd.recon = recon[:, :min_len]
+                self._sd.recon = data
                 self._sd.recon_path = raw_path or path
-                self._sd.n_samples = min_len
+                self._sd.s_freq = s_freq
+                self._sd.n_chan = data.shape[0]
+                self._sd.n_samples = data.shape[1]
 
-                # ── 计算每通道幅值 ──────────────────────────
                 self._sd.compute_params()
 
-                # ── 构建视图 ────────────────────────────────
+                total_s = self._sd.n_samples / self._sd.s_freq
+                self._lbl_info.setText(
+                    f"{self._sd.n_chan}ch · "
+                    f"{self._sd.s_freq / 1000:.0f}kSa/s · "
+                    f"{total_s:.1f}s")
+
                 self._grid.set_mode(self._mode)
                 self._grid.build()
 
-                # ── 配置播放器 ──────────────────────────────
                 self._player.configure(
                     self._sd.s_freq, self._sd.n_samples,
                     self._sd.window_pts)
                 self._player.seek(0)
 
-                # ── 启用所有控件 ────────────────────────────
                 self._slider_ch.setMaximum(
-                    max(0, self._sd.max_channel_offset))
+                    self._sd.max_channel_offset(VISIBLE_ROWS))
                 self._slider_ch.setValue(0)
                 self._btn_play.setEnabled(True)
                 self._btn_loop.setEnabled(True)
@@ -427,7 +394,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 QtWidgets.QMessageBox.critical(
                     self, "Error", f"Loading failed:\n{e}")
 
-        self._load_mat_async(path, "Loading Recdata", on_done)
+        self._load_mat_async(path, "Loading Signal", on_done)
 
     def _load_mat_async(self, path: str, title: str, on_done):
         """异步加载 .mat 文件。
@@ -488,7 +455,7 @@ class MainWindow(QtWidgets.QMainWindow):
             # 更新绝对时间戳
             abs_sec = ptr / self._sd.s_freq
             mins, sec = divmod(abs_sec, 60)
-            self._lbl_timestamp.setText(f"{int(mins):02d}:{sec:06.3f}")
+            self._lbl_timestamp.setText( f"{int(mins):02d}m {sec:06.3f}s")
         finally:
             self._player.ack()
 

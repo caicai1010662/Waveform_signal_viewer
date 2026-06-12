@@ -287,15 +287,13 @@ def load_mat(path: str) -> np.ndarray:
 
 @dataclass
 class SignalData:
-    """持有原始和重建数据，所有显示参数由数据驱动。
+    """单信号数据容器，所有显示参数由数据驱动。
 
     使用 memmap 存储：首次加载后写入 .raw 缓存，后续零 RAM 占用。
     """
 
     # ── 数据 ────────────────────────────────────────────
-    orig: Optional[np.ndarray] = None    # 原始信号 (n_chan, n_samples) float32
-    recon: Optional[np.ndarray] = None   # 重建信号 (n_chan, n_samples) float32
-    orig_path: str = ""                  # 原始文件路径（用于缓存管理）
+    recon: Optional[np.ndarray] = None   # 信号 (n_chan, n_samples) float32
     recon_path: str = ""
 
     # ── 元信息 ──────────────────────────────────────────
@@ -309,50 +307,43 @@ class SignalData:
     amp_scale: float = 1.0               # 幅值缩放倍率，通过 Amp 滑动条调整
 
     # ── 数据计算参数（compute_params() 后填充）─────────
-    ch_amp: Optional[np.ndarray] = None       # (n_chan,) Rawdata 每通道幅值 (µV)
-    ch_amp_recon: Optional[np.ndarray] = None # (n_chan,) Recdata 每通道幅值 (µV)
-    ch_amp_computed: bool = False             # ch_amp 是否已计算
+    ch_amp: Optional[np.ndarray] = None  # (n_chan,) 每通道幅值 (µV)
+    ch_amp_computed: bool = False        # ch_amp 是否已计算
 
     # ── 状态属性 ────────────────────────────────────────
 
     @property
     def ready(self) -> bool:
-        """两组数据是否都已加载。"""
-        return self.orig is not None and self.recon is not None
+        """数据是否已加载。"""
+        return self.recon is not None
 
     @property
     def total_rows(self) -> int:
         """总行数 = 通道总数。"""
         return self.n_chan if self.n_chan > 0 else 0
 
-    @property
-    def max_channel_offset(self) -> int:
-        """通道浏览滑块的最大值（最后一个可见通道的起始索引）。"""
-        return max(0, self.n_chan - 1)
+    def max_channel_offset(self, per_page: int = 1) -> int:
+        """滑块最大值，保证最后一页始终满屏 per_page 个通道。
+
+        Args:
+            per_page: 当前模式一屏的通道数（Trace=VISIBLE_ROWS, Grid=TILE_COLS×VISIBLE_TILE_ROWS）
+        """
+        return max(0, self.n_chan - per_page)
 
     # ── 参数计算 ────────────────────────────────────────
 
     def compute_params(self):
-        """从原始 + 重建前 5 秒数据分别计算每通道幅值。
-
-        同时计算 Rawdata 和 Recdata 的 ch_amp，解决重建信号幅值
-        与原始信号差异大时 Detail 窗 Y 轴被一方锁死导致另一方削顶的 bug。
+        """从信号前 5 秒数据计算每通道幅值。
 
         算法: 每通道取 |信号| 的 Y_PERCENTILE 分位作为幅值。
-        在加载重建信号后由 app.py 调用一次。
+        加载数据后由 app.py 调用一次。
         """
-        if self.orig is None:
+        if self.recon is None:
             return
         sample_len = min(self.n_samples, self.s_freq * 5)
-        # Rawdata 幅值
-        sample_orig = self.orig[:, :sample_len]
+        sample = self.recon[:, :sample_len]
         self.ch_amp = np.maximum(
-            np.percentile(np.abs(sample_orig), Y_PERCENTILE, axis=1), 1.0)
-        # Recdata 幅值（重建信号可能有完全不同的量级）
-        if self.recon is not None:
-            sample_recon = self.recon[:, :sample_len]
-            self.ch_amp_recon = np.maximum(
-                np.percentile(np.abs(sample_recon), Y_PERCENTILE, axis=1), 1.0)
+            np.percentile(np.abs(sample), Y_PERCENTILE, axis=1), 1.0)
         self.window_pts = int(self.window_sec * self.s_freq)
         self.ch_amp_computed = True
 
@@ -369,38 +360,20 @@ class SignalData:
 
     # ── Y 轴范围计算 ────────────────────────────────────
 
-    def y_range_detail(self, ch: int, source: str = 'orig',
-                        y_padding: float = 1.0) -> tuple[float, float]:
+    def y_range_detail(self, ch: int, y_padding: float = 1.0) -> tuple[float, float]:
         """单个通道 Detail 视图的 Y 轴范围: ±(幅值 × y_padding × 缩放)。
 
         Args:
             ch:        通道索引
-            source:    'orig'（Rawdata 幅值）或 'recon'（Recdata 幅值）
             y_padding: Y 轴上下留白系数（detail.py 传入 DETAIL_Y_PADDING）
 
         Returns:
             (y_min, y_max)，例如 (-50.0, 50.0)
         """
-        if source == 'recon' and self.ch_amp_recon is not None:
-            amp_arr = self.ch_amp_recon
-        else:
-            amp_arr = self.ch_amp
-        if amp_arr is None or ch >= len(amp_arr):
+        if self.ch_amp is None or ch >= len(self.ch_amp):
             return (-100.0, 100.0)
-        amp = float(amp_arr[ch]) * y_padding * self.amp_scale
+        amp = float(self.ch_amp[ch]) * y_padding * self.amp_scale
         return (-amp, amp)
-
-    def y_range_overlay(self, ch: int, y_padding: float = 1.0) -> tuple[float, float]:
-        """Overlay 模式的 Y 轴范围: 取两信号中较大的幅值。
-
-        确保 Rawdata 和 Recdata 两条曲线都能完整显示，不会因为
-        一方幅值远大于另一方而导致削顶。
-        """
-        y_lo_orig, y_hi_orig = self.y_range_detail(ch, 'orig', y_padding)
-        y_lo_recon, y_hi_recon = self.y_range_detail(ch, 'recon', y_padding)
-        y_lo = min(y_lo_orig, y_lo_recon)
-        y_hi = max(y_hi_orig, y_hi_recon)
-        return (y_lo, y_hi)
 
     def y_offset(self, ch: int) -> float:
         """返回通道 ch 在 Row 模式下的 Y 轴中心偏移量。
