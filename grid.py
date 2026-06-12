@@ -41,7 +41,7 @@ VISIBLE_TILE_ROWS = 4
 # 波形线宽（像素）
 LINE_WIDTH = 1.0
 
-# Grid 模式下 Y 轴留白系数（1.3 = 上下各 15% 呼吸空间）
+# Grid 模式下 Y 轴留白系数（改大=上下留白更多）
 GRID_Y_PADDING = 1.0
 
 # 每曲线最大数据点数。超过此数 → 每隔 N 个取 1 个（简单步进降采样）
@@ -216,7 +216,6 @@ class GridView(QtWidgets.QWidget):
         n_rows = min(VISIBLE_TILE_ROWS,
                      (sd.n_chan + TILE_COLS - 1) // TILE_COLS)
         w = sd.window_sec
-        font = make_font(FONT_SIZE)
 
         for r in range(n_rows):
             for c in range(TILE_COLS):

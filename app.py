@@ -90,7 +90,7 @@ class MainWindow(QtWidgets.QMainWindow):
         root.setSpacing(4)
 
         # ══ 顶栏 ══════════════════════════════════════════
-        font18 = make_font(20)
+        font20 = make_font(20)
         bar = QtWidgets.QHBoxLayout()
         bar.setContentsMargins(4, 2, 4, 2)
         bar.setSpacing(10)
@@ -141,7 +141,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # ── 时窗 ──────────────────────────────────────────
         lbl_time_title = QtWidgets.QLabel("Time:")
-        lbl_time_title.setFont(font18)
+        lbl_time_title.setFont(font20)
         lbl_time_title.setStyleSheet("color: #AAAAAA;")
         bar.addWidget(lbl_time_title)
         self._lbl_win = self._make_info_label("50ms")
@@ -154,7 +154,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # ── 幅值 ──────────────────────────────────────────
         bar.addWidget(self._make_spacer(10))
         lbl_amp_title = QtWidgets.QLabel("Amp:")
-        lbl_amp_title.setFont(font18)
+        lbl_amp_title.setFont(font20)
         lbl_amp_title.setStyleSheet("color: #AAAAAA;")
         bar.addWidget(lbl_amp_title)
         self._lbl_amp = self._make_info_label("1.0×")
@@ -167,7 +167,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # ── 速度 ──────────────────────────────────────────
         bar.addWidget(self._make_spacer(10))
         lbl_speed_title = QtWidgets.QLabel("Speed:")
-        lbl_speed_title.setFont(font18)
+        lbl_speed_title.setFont(font20)
         lbl_speed_title.setStyleSheet("color: #AAAAAA;")
         bar.addWidget(lbl_speed_title)
         self._lbl_speed = self._make_info_label("1.0×")
