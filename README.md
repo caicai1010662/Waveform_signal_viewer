@@ -2,6 +2,8 @@
 
 单信号高速渲染。VS Code Dark Theme。多通道 @ 30k Sa/s，80fps 流畅播放。
 
+> 🎓 **小白入门？** 先读 [LEARN.md](LEARN.md) — 从零开始的渐进式学习指南，附带实验和检查清单。
+
 ## 快速开始
 
 ```bash
@@ -60,6 +62,13 @@ python main.py
 | Time / Amp | 标签数值即时更新 | 一次性 grid 重载 | 只需看结果，无需中间重绘 |
 | Speed | 即时更新 | — | `player.set_speed()` 无重绘开销 |
 | **Channel** | 30ms 短防抖（~33fps 视觉反馈） | 立即定格 | 需要看到通道变化来定位 |
+
+## 文档
+
+| 文档 | 适合 |
+|------|------|
+| [LEARN.md](LEARN.md) | 🎓 小白渐进式学习，从零吃透项目 |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | 🗺️ 架构速查卡，信号连接、渲染管线、内存分布 |
 
 ## 项目结构（8 个 .py 文件）
 
